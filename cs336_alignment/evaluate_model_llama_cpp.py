@@ -51,10 +51,24 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 def evaluate_llama(
     model: LLM,
     reward_fn: Callable[[str, str], dict[str, float]],
-    prompts: List[Tuple[str, str]],
+    data: List[Tuple[str, str]],
     eval_sampling_params: SamplingParams,
+    print_results: bool = False,
 ):
-    pass
+    prompts, answers = zip(*data)
+    outputs = model.generate(prompts, eval_sampling_params)
+    scores = [
+        reward_fn(output.outputs[0].text, answer)
+        for output, answer in zip(outputs, answers)
+    ]
+    if print_results:
+        for prompt, answer, score in zip(prompts, answers, scores):
+            print(f"Prompt: {prompt}")
+            print(f"Answer: {answer}")
+            print(f"Score: {score}")
+            print("--------")
+
+    return scores
 
 
 evaluate_llama(
