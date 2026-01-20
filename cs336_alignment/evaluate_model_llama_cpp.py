@@ -1,6 +1,41 @@
 from typing import Callable, List
+import pandas as pd
+from pathlib import Path
 from vllm import LLM, SamplingParams
 from drgrpo_grader import r1_zero_reward_fn
+
+
+def load_math_parquet_data(data_dir: str = "./data/MATH/data") -> List[tuple[str, str]]:
+    """
+    Load MATH dataset from parquet files.
+    
+    Args:
+        data_dir: Directory containing parquet files with 'problem' and 'answer' columns
+        
+    Returns:
+        List of (problem, answer) tuples
+    """
+    data_path = Path(data_dir)
+    results = []
+    
+    # Find all parquet files in the directory
+    parquet_files = list(data_path.glob("*.parquet"))
+    
+    if not parquet_files:
+        raise FileNotFoundError(f"No parquet files found in {data_dir}")
+    
+    for parquet_file in parquet_files:
+        df = pd.read_parquet(parquet_file)
+        
+        # Verify required columns exist
+        if "problem" not in df.columns or "answer" not in df.columns:
+            raise ValueError(f"File {parquet_file} missing 'problem' or 'answer' column")
+        
+        # Convert to list of tuples
+        for _, row in df.iterrows():
+            results.append((str(row["problem"]), str(row["answer"])))
+    
+    return results
 
 
 def evaluate_llama(
