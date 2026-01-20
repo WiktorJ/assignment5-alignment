@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable, List, Tuple
 import pandas as pd
 from pathlib import Path
 from vllm import LLM, SamplingParams
@@ -51,15 +51,15 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 def evaluate_llama(
     model: LLM,
     reward_fn: Callable[[str, str], dict[str, float]],
-    prompts: List[str],
+    prompts: List[Tuple[str, str]],
     eval_sampling_params: SamplingParams,
 ):
     pass
 
 
-# qwen = LLM(model="Qwen/Qwen2.5-Math-1.5B")
-# eval_sampling_params = SamplingParams(
-#    temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
-# )
-
-print(load_math_parquet_data()[:2])
+evaluate_llama(
+    LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+    r1_zero_reward_fn,
+    load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+    SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]),
+)
