@@ -53,7 +53,7 @@ def evaluate_llama(
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
     eval_sampling_params: SamplingParams,
-    print_results: bool = False,
+    print_intermetiate_results: bool = False,
 ):
     prompts, answers = zip(*data)
     outputs = model.generate(prompts, eval_sampling_params)
@@ -62,11 +62,22 @@ def evaluate_llama(
         for output, answer in zip(outputs, answers)
     ]
     if print_results:
-        for prompt, answer, score in zip(prompts, answers, scores):
+        for prompt, answer, output, score in zip(prompts, answers, outputs, scores):
             print(f"Prompt: {prompt}")
             print(f"Answer: {answer}")
+            print(f"Output: {output.outputs[0].text}")
             print(f"Score: {score}")
             print("--------")
+
+    total_format_reward = sum(score["format_reward"] for score in scores)
+    total_answer_reward = sum(score["answer_reward"] for score in scores)
+    total_reward = sum(score["reward"] for score in scores)
+    print(f"Total format reward: {total_format_reward}")
+    print(f"Total answer reward: {total_answer_reward}")
+    print(f"Total reward: {total_reward}")
+    print(f"Average format reward: {total_format_reward / len(scores)}")
+    print(f"Average answer reward: {total_answer_reward / len(scores)}")
+    print(f"Average reward: {total_reward / len(scores)}")
 
     return scores
 
