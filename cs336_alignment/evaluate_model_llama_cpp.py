@@ -5,24 +5,32 @@ from vllm import LLM, SamplingParams
 from drgrpo_grader import r1_zero_reward_fn
 
 
-def load_math_parquet_data(data_dir: str = "./data/MATH/data") -> List[tuple[str, str]]:
+def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, str]]:
     """
-    Load MATH dataset from parquet files.
+    Load MATH dataset from parquet file(s).
 
     Args:
-        data_dir: Directory containing parquet files with 'problem' and 'answer' columns
+        path: Path to a specific parquet file or directory containing parquet files
+              with 'problem' and 'answer' columns
 
     Returns:
         List of (problem, answer) tuples
     """
-    data_path = Path(data_dir)
+    data_path = Path(path)
     results = []
 
-    # Find all parquet files in the directory
-    parquet_files = list(data_path.glob("*.parquet"))
-
-    if not parquet_files:
-        raise FileNotFoundError(f"No parquet files found in {data_dir}")
+    # Determine if path is a file or directory
+    if data_path.is_file():
+        if not data_path.suffix == ".parquet":
+            raise ValueError(f"File {path} is not a parquet file")
+        parquet_files = [data_path]
+    elif data_path.is_dir():
+        # Find all parquet files in the directory
+        parquet_files = list(data_path.glob("*.parquet"))
+        if not parquet_files:
+            raise FileNotFoundError(f"No parquet files found in {path}")
+    else:
+        raise FileNotFoundError(f"Path {path} does not exist")
 
     for parquet_file in parquet_files:
         df = pd.read_parquet(parquet_file)
