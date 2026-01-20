@@ -61,7 +61,7 @@ def evaluate_llama(
         reward_fn(output.outputs[0].text, answer)
         for output, answer in zip(outputs, answers)
     ]
-    if print_results:
+    if print_intermetiate_results:
         for prompt, answer, output, score in zip(prompts, answers, outputs, scores):
             print(f"Prompt: {prompt}")
             print(f"Answer: {answer}")
