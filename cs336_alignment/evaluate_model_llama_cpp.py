@@ -19,6 +19,96 @@ def load_system_prompt(prompt_path: str) -> str:
         return f.read()
 
 
+def calculate_reward_metrics(
+    intermediate_results: List[dict], reward_key: str
+) -> dict:
+    """
+    Calculate sum and accuracy metrics for a specific reward type.
+
+    Args:
+        intermediate_results: List of result dictionaries
+        reward_key: Key to extract from results ('reward', 'format_reward', or 'answer_reward')
+
+    Returns:
+        Dictionary with 'sum' and 'accuracy' keys
+    """
+    n = len(intermediate_results)
+    reward_sum = sum(r[reward_key] for r in intermediate_results)
+    accuracy = sum(1 for r in intermediate_results if r[reward_key] > 0) / n
+    return {"sum": reward_sum, "accuracy": accuracy}
+
+
+def calculate_conditional_reward_metrics(
+    intermediate_results: List[dict],
+    condition_key: str,
+    condition_value: float,
+    reward_key: str,
+) -> dict:
+    """
+    Calculate reward metrics when another reward meets a condition.
+
+    Args:
+        intermediate_results: List of result dictionaries
+        condition_key: Key to check condition on
+        condition_value: Value to compare against
+        reward_key: Key to calculate metrics for
+
+    Returns:
+        Dictionary with 'sum', 'accuracy', and 'count' keys
+    """
+    filtered_results = [
+        r for r in intermediate_results if r[condition_key] == condition_value
+    ]
+
+    if filtered_results:
+        reward_sum = sum(r[reward_key] for r in filtered_results)
+        accuracy = sum(1 for r in filtered_results if r[reward_key] > 0) / len(
+            filtered_results
+        )
+    else:
+        reward_sum = 0
+        accuracy = 0
+
+    return {"sum": reward_sum, "accuracy": accuracy, "count": len(filtered_results)}
+
+
+def print_evaluation_summary(results: dict) -> None:
+    """
+    Print a formatted summary of evaluation results.
+
+    Args:
+        results: Dictionary containing evaluation metrics
+    """
+    n = len(results["intermediate_results"])
+    print(f"Total samples: {n}")
+
+    print(
+        f"\nTotal Reward - Sum: {results['total_reward']['sum']:.2f}, "
+        f"Accuracy: {results['total_reward']['accuracy']:.2%}"
+    )
+    print(
+        f"Format Reward - Sum: {results['format_reward']['sum']:.2f}, "
+        f"Accuracy: {results['format_reward']['accuracy']:.2%}"
+    )
+    print(
+        f"Answer Reward - Sum: {results['answer_reward']['sum']:.2f}, "
+        f"Accuracy: {results['answer_reward']['accuracy']:.2%}"
+    )
+
+    print(
+        f"\nFormat Reward when Answer=0 - "
+        f"Sum: {results['format_reward_when_answer_zero']['sum']:.2f}, "
+        f"Accuracy: {results['format_reward_when_answer_zero']['accuracy']:.2%}, "
+        f"Count: {results['format_reward_when_answer_zero']['count']}"
+    )
+    print(
+        f"Answer Reward when Format=0 - "
+        f"Sum: {results['answer_reward_when_format_zero']['sum']:.2f}, "
+        f"Accuracy: {results['answer_reward_when_format_zero']['accuracy']:.2%}, "
+        f"Count: {results['answer_reward_when_format_zero']['count']}"
+    )
+
+
 def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, str]]:
     """
     Load MATH dataset from parquet file(s).
@@ -109,97 +199,22 @@ def evaluate_llama(
             }
         )
 
-    n = len(intermediate_results)
-
-    # Calculate total reward metrics
-    total_reward_sum = sum(r["reward"] for r in intermediate_results)
-    total_reward_accuracy = sum(1 for r in intermediate_results if r["reward"] > 0) / n
-
-    # Calculate format reward metrics
-    format_reward_sum = sum(r["format_reward"] for r in intermediate_results)
-    format_reward_accuracy = (
-        sum(1 for r in intermediate_results if r["format_reward"] > 0) / n
-    )
-
-    # Calculate answer reward metrics
-    answer_reward_sum = sum(r["answer_reward"] for r in intermediate_results)
-    answer_reward_accuracy = (
-        sum(1 for r in intermediate_results if r["answer_reward"] > 0) / n
-    )
-
-    # Calculate format reward when answer reward is 0
-    format_when_answer_zero = [
-        r for r in intermediate_results if r["answer_reward"] == 0
-    ]
-    if format_when_answer_zero:
-        format_when_answer_zero_sum = sum(
-            r["format_reward"] for r in format_when_answer_zero
-        )
-        format_when_answer_zero_accuracy = sum(
-            1 for r in format_when_answer_zero if r["format_reward"] > 0
-        ) / len(format_when_answer_zero)
-    else:
-        format_when_answer_zero_sum = 0
-        format_when_answer_zero_accuracy = 0
-
-    # Calculate answer reward when format reward is 0
-    answer_when_format_zero = [
-        r for r in intermediate_results if r["format_reward"] == 0
-    ]
-    if answer_when_format_zero:
-        answer_when_format_zero_sum = sum(
-            r["answer_reward"] for r in answer_when_format_zero
-        )
-        answer_when_format_zero_accuracy = sum(
-            1 for r in answer_when_format_zero if r["answer_reward"] > 0
-        ) / len(answer_when_format_zero)
-    else:
-        answer_when_format_zero_sum = 0
-        answer_when_format_zero_accuracy = 0
-
+    # Calculate metrics using helper functions
     results = {
         "intermediate_results": intermediate_results,
-        "total_reward": {
-            "sum": total_reward_sum,
-            "accuracy": total_reward_accuracy,
-        },
-        "format_reward": {
-            "sum": format_reward_sum,
-            "accuracy": format_reward_accuracy,
-        },
-        "answer_reward": {
-            "sum": answer_reward_sum,
-            "accuracy": answer_reward_accuracy,
-        },
-        "format_reward_when_answer_zero": {
-            "sum": format_when_answer_zero_sum,
-            "accuracy": format_when_answer_zero_accuracy,
-            "count": len(format_when_answer_zero),
-        },
-        "answer_reward_when_format_zero": {
-            "sum": answer_when_format_zero_sum,
-            "accuracy": answer_when_format_zero_accuracy,
-            "count": len(answer_when_format_zero),
-        },
+        "total_reward": calculate_reward_metrics(intermediate_results, "reward"),
+        "format_reward": calculate_reward_metrics(intermediate_results, "format_reward"),
+        "answer_reward": calculate_reward_metrics(intermediate_results, "answer_reward"),
+        "format_reward_when_answer_zero": calculate_conditional_reward_metrics(
+            intermediate_results, "answer_reward", 0, "format_reward"
+        ),
+        "answer_reward_when_format_zero": calculate_conditional_reward_metrics(
+            intermediate_results, "format_reward", 0, "answer_reward"
+        ),
     }
 
     # Print summary
-    print(f"Total samples: {n}")
-    print(
-        f"\nTotal Reward - Sum: {total_reward_sum:.2f}, Accuracy: {total_reward_accuracy:.2%}"
-    )
-    print(
-        f"Format Reward - Sum: {format_reward_sum:.2f}, Accuracy: {format_reward_accuracy:.2%}"
-    )
-    print(
-        f"Answer Reward - Sum: {answer_reward_sum:.2f}, Accuracy: {answer_reward_accuracy:.2%}"
-    )
-    print(
-        f"\nFormat Reward when Answer=0 - Sum: {format_when_answer_zero_sum:.2f}, Accuracy: {format_when_answer_zero_accuracy:.2%}, Count: {len(format_when_answer_zero)}"
-    )
-    print(
-        f"Answer Reward when Format=0 - Sum: {answer_when_format_zero_sum:.2f}, Accuracy: {answer_when_format_zero_accuracy:.2%}, Count: {len(answer_when_format_zero)}"
-    )
+    print_evaluation_summary(results)
 
     return results
 
