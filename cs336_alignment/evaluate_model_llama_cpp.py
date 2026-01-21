@@ -64,9 +64,9 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 
 def evaluate_llama(
     model: LLM,
+    eval_sampling_params: SamplingParams,
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
-    eval_sampling_params: SamplingParams,
     system_prompt: str,
     print_intermetiate_results: bool = False,
 ):
@@ -100,11 +100,13 @@ def evaluate_llama(
 
 
 # Example usage:
-# system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
-# evaluate_llama(
-#     LLM(model="Qwen/Qwen2.5-Math-1.5B"),
-#     r1_zero_reward_fn,
-#     load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
-#     SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]),
-#     system_prompt=system_prompt,
-# )
+system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+evaluate_llama(
+    model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+    eval_sampling_params=SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+    ),
+    reward_fn=r1_zero_reward_fn,
+    data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+    system_prompt=system_prompt,
+)
