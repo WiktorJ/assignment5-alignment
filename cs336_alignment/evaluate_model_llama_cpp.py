@@ -68,45 +68,133 @@ def evaluate_llama(
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
     system_prompt: str,
-    print_intermetiate_results: bool = False,
+    print_intermediate_results: bool = False,
 ):
+    """
+    Evaluate a language model on a dataset.
+
+    Args:
+        model: The LLM model to evaluate
+        eval_sampling_params: Sampling parameters for generation
+        reward_fn: Function that takes (output, answer) and returns dict with 'format_reward', 'answer_reward', 'reward'
+        data: List of (question, answer) tuples
+        system_prompt: System prompt template with {question} placeholder
+        print_intermediate_results: Whether to print intermediate results
+
+    Returns:
+        Dictionary containing:
+            - intermediate_results: List of dicts with prompts, answers, outputs, and scores
+            - total_reward: Sum and accuracy for total reward
+            - format_reward: Sum and accuracy for format reward
+            - answer_reward: Sum and accuracy for answer reward
+            - format_reward_when_answer_zero: Sum and accuracy for format reward when answer reward is 0
+            - answer_reward_when_format_zero: Sum and accuracy for answer reward when format reward is 0
+    """
     questions, answers = zip(*data)
     # Interpolate each question into the system prompt
     prompts = [system_prompt.replace("{question}", question) for question in questions]
     outputs = model.generate(prompts, eval_sampling_params)
-    scores = [
-        reward_fn(output.outputs[0].text, answer)
-        for output, answer in zip(outputs, answers)
-    ]
-    if print_intermetiate_results:
-        for prompt, answer, output, score in zip(prompts, answers, outputs, scores):
-            print(f"Prompt: {prompt}")
-            print(f"Answer: {answer}")
-            print(f"Output: {output.outputs[0].text}")
-            print(f"Score: {score}")
+    
+    # Collect intermediate results
+    intermediate_results = []
+    for prompt, answer, output in zip(prompts, answers, outputs):
+        score = reward_fn(output.outputs[0].text, answer)
+        intermediate_results.append({
+            "prompt": prompt,
+            "answer": answer,
+            "output": output.outputs[0].text,
+            "format_reward": score["format_reward"],
+            "answer_reward": score["answer_reward"],
+            "reward": score["reward"],
+        })
+    
+    if print_intermediate_results:
+        for result in intermediate_results:
+            print(f"Prompt: {result['prompt']}")
+            print(f"Answer: {result['answer']}")
+            print(f"Output: {result['output']}")
+            print(f"Format Reward: {result['format_reward']}")
+            print(f"Answer Reward: {result['answer_reward']}")
+            print(f"Total Reward: {result['reward']}")
             print("--------")
-
-    total_format_reward = sum(score["format_reward"] for score in scores)
-    total_answer_reward = sum(score["answer_reward"] for score in scores)
-    total_reward = sum(score["reward"] for score in scores)
-    print(f"Total format reward: {total_format_reward}")
-    print(f"Total answer reward: {total_answer_reward}")
-    print(f"Total reward: {total_reward}")
-    print(f"Average format reward: {total_format_reward / len(scores)}")
-    print(f"Average answer reward: {total_answer_reward / len(scores)}")
-    print(f"Average reward: {total_reward / len(scores)}")
-
-    return scores
+    
+    n = len(intermediate_results)
+    
+    # Calculate total reward metrics
+    total_reward_sum = sum(r["reward"] for r in intermediate_results)
+    total_reward_accuracy = sum(1 for r in intermediate_results if r["reward"] > 0) / n
+    
+    # Calculate format reward metrics
+    format_reward_sum = sum(r["format_reward"] for r in intermediate_results)
+    format_reward_accuracy = sum(1 for r in intermediate_results if r["format_reward"] > 0) / n
+    
+    # Calculate answer reward metrics
+    answer_reward_sum = sum(r["answer_reward"] for r in intermediate_results)
+    answer_reward_accuracy = sum(1 for r in intermediate_results if r["answer_reward"] > 0) / n
+    
+    # Calculate format reward when answer reward is 0
+    format_when_answer_zero = [r for r in intermediate_results if r["answer_reward"] == 0]
+    if format_when_answer_zero:
+        format_when_answer_zero_sum = sum(r["format_reward"] for r in format_when_answer_zero)
+        format_when_answer_zero_accuracy = sum(1 for r in format_when_answer_zero if r["format_reward"] > 0) / len(format_when_answer_zero)
+    else:
+        format_when_answer_zero_sum = 0
+        format_when_answer_zero_accuracy = 0
+    
+    # Calculate answer reward when format reward is 0
+    answer_when_format_zero = [r for r in intermediate_results if r["format_reward"] == 0]
+    if answer_when_format_zero:
+        answer_when_format_zero_sum = sum(r["answer_reward"] for r in answer_when_format_zero)
+        answer_when_format_zero_accuracy = sum(1 for r in answer_when_format_zero if r["answer_reward"] > 0) / len(answer_when_format_zero)
+    else:
+        answer_when_format_zero_sum = 0
+        answer_when_format_zero_accuracy = 0
+    
+    results = {
+        "intermediate_results": intermediate_results,
+        "total_reward": {
+            "sum": total_reward_sum,
+            "accuracy": total_reward_accuracy,
+        },
+        "format_reward": {
+            "sum": format_reward_sum,
+            "accuracy": format_reward_accuracy,
+        },
+        "answer_reward": {
+            "sum": answer_reward_sum,
+            "accuracy": answer_reward_accuracy,
+        },
+        "format_reward_when_answer_zero": {
+            "sum": format_when_answer_zero_sum,
+            "accuracy": format_when_answer_zero_accuracy,
+            "count": len(format_when_answer_zero),
+        },
+        "answer_reward_when_format_zero": {
+            "sum": answer_when_format_zero_sum,
+            "accuracy": answer_when_format_zero_accuracy,
+            "count": len(answer_when_format_zero),
+        },
+    }
+    
+    # Print summary
+    print(f"Total samples: {n}")
+    print(f"\nTotal Reward - Sum: {total_reward_sum:.2f}, Accuracy: {total_reward_accuracy:.2%}")
+    print(f"Format Reward - Sum: {format_reward_sum:.2f}, Accuracy: {format_reward_accuracy:.2%}")
+    print(f"Answer Reward - Sum: {answer_reward_sum:.2f}, Accuracy: {answer_reward_accuracy:.2%}")
+    print(f"\nFormat Reward when Answer=0 - Sum: {format_when_answer_zero_sum:.2f}, Accuracy: {format_when_answer_zero_accuracy:.2%}, Count: {len(format_when_answer_zero)}")
+    print(f"Answer Reward when Format=0 - Sum: {answer_when_format_zero_sum:.2f}, Accuracy: {answer_when_format_zero_accuracy:.2%}, Count: {len(answer_when_format_zero)}")
+    
+    return results
 
 
 # Example usage:
-system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
-evaluate_llama(
-    model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
-    eval_sampling_params=SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
-    ),
-    reward_fn=r1_zero_reward_fn,
-    data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
-    system_prompt=system_prompt,
-)
+# system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+# results = evaluate_llama(
+#     model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+#     eval_sampling_params=SamplingParams(
+#         temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+#     ),
+#     reward_fn=r1_zero_reward_fn,
+#     data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+#     system_prompt=system_prompt,
+# )
