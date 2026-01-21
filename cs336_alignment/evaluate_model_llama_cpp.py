@@ -5,6 +5,20 @@ from vllm import LLM, SamplingParams
 from drgrpo_grader import r1_zero_reward_fn
 
 
+def load_system_prompt(prompt_path: str) -> str:
+    """
+    Load system prompt from a file.
+
+    Args:
+        prompt_path: Path to the prompt file
+
+    Returns:
+        The system prompt as a string
+    """
+    with open(prompt_path, "r") as f:
+        return f.read()
+
+
 def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, str]]:
     """
     Load MATH dataset from parquet file(s).
@@ -53,9 +67,12 @@ def evaluate_llama(
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
     eval_sampling_params: SamplingParams,
+    system_prompt: str,
     print_intermetiate_results: bool = False,
 ):
-    prompts, answers = zip(*data)
+    questions, answers = zip(*data)
+    # Interpolate each question into the system prompt
+    prompts = [system_prompt.replace("{question}", question) for question in questions]
     outputs = model.generate(prompts, eval_sampling_params)
     scores = [
         reward_fn(output.outputs[0].text, answer)
@@ -82,9 +99,12 @@ def evaluate_llama(
     return scores
 
 
-evaluate_llama(
-    LLM(model="Qwen/Qwen2.5-Math-1.5B"),
-    r1_zero_reward_fn,
-    load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
-    SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]),
-)
+# Example usage:
+# system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+# evaluate_llama(
+#     LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+#     r1_zero_reward_fn,
+#     load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+#     SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]),
+#     system_prompt=system_prompt,
+# )
