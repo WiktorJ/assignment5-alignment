@@ -19,9 +19,7 @@ def load_system_prompt(prompt_path: str) -> str:
         return f.read()
 
 
-def calculate_reward_metrics(
-    intermediate_results: List[dict], reward_key: str
-) -> dict:
+def calculate_reward_metrics(intermediate_results: List[dict], reward_key: str) -> dict:
     """
     Calculate sum and accuracy metrics for a specific reward type.
 
@@ -112,7 +110,7 @@ def print_evaluation_summary(results: dict) -> None:
 def print_example_results(
     results: dict,
     n_examples: int = 3,
-    groups: List[str] = None,
+    groups: List[str] | None = None,
 ) -> None:
     """
     Print well-formatted examples from different groups of intermediate results.
@@ -155,7 +153,9 @@ def print_example_results(
             continue
 
         # Filter results for this group
-        group_results = [r for r in intermediate_results if group_filters[group_name](r)]
+        group_results = [
+            r for r in intermediate_results if group_filters[group_name](r)
+        ]
 
         print(f"\n{'─' * 80}")
         print(f"GROUP: {group_name.upper().replace('_', ' ')}")
@@ -182,7 +182,9 @@ def print_example_results(
             print(f"    Total:  {result['reward']:.2f}")
 
         if len(group_results) > n_examples:
-            print(f"\n  ... and {len(group_results) - n_examples} more examples in this group")
+            print(
+                f"\n  ... and {len(group_results) - n_examples} more examples in this group"
+            )
 
     print("\n" + "=" * 80)
 
@@ -281,8 +283,12 @@ def evaluate_llama(
     results = {
         "intermediate_results": intermediate_results,
         "total_reward": calculate_reward_metrics(intermediate_results, "reward"),
-        "format_reward": calculate_reward_metrics(intermediate_results, "format_reward"),
-        "answer_reward": calculate_reward_metrics(intermediate_results, "answer_reward"),
+        "format_reward": calculate_reward_metrics(
+            intermediate_results, "format_reward"
+        ),
+        "answer_reward": calculate_reward_metrics(
+            intermediate_results, "answer_reward"
+        ),
         "format_reward_when_answer_zero": calculate_conditional_reward_metrics(
             intermediate_results, "answer_reward", 0, "format_reward"
         ),
@@ -298,13 +304,15 @@ def evaluate_llama(
 
 
 # Example usage:
-# system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
-# results = evaluate_llama(
-#     model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
-#     eval_sampling_params=SamplingParams(
-#         temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
-#     ),
-#     reward_fn=r1_zero_reward_fn,
-#     data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
-#     system_prompt=system_prompt,
-# )
+system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+results = evaluate_llama(
+    model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+    eval_sampling_params=SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+    ),
+    reward_fn=r1_zero_reward_fn,
+    data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+    system_prompt=system_prompt,
+)
+
+print_example_results(results, 10)
