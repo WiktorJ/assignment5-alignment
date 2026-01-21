@@ -109,6 +109,84 @@ def print_evaluation_summary(results: dict) -> None:
     )
 
 
+def print_example_results(
+    results: dict,
+    n_examples: int = 3,
+    groups: List[str] = None,
+) -> None:
+    """
+    Print well-formatted examples from different groups of intermediate results.
+
+    Args:
+        results: Dictionary containing evaluation metrics and intermediate results
+        n_examples: Number of examples to print per group
+        groups: List of groups to print. Options:
+            - 'both_correct': Both format and answer rewards are positive
+            - 'format_only': Format correct but answer wrong
+            - 'answer_only': Answer correct but format wrong
+            - 'both_wrong': Both format and answer rewards are zero
+            - 'all': Print examples from all groups
+            If None, defaults to ['all']
+    """
+    if groups is None:
+        groups = ["all"]
+
+    intermediate_results = results["intermediate_results"]
+
+    # Define group filters
+    group_filters = {
+        "both_correct": lambda r: r["format_reward"] > 0 and r["answer_reward"] > 0,
+        "format_only": lambda r: r["format_reward"] > 0 and r["answer_reward"] == 0,
+        "answer_only": lambda r: r["format_reward"] == 0 and r["answer_reward"] > 0,
+        "both_wrong": lambda r: r["format_reward"] == 0 and r["answer_reward"] == 0,
+    }
+
+    # If 'all' is specified, print from all groups
+    if "all" in groups:
+        groups = list(group_filters.keys())
+
+    print("\n" + "=" * 80)
+    print("EXAMPLE RESULTS BY GROUP")
+    print("=" * 80)
+
+    for group_name in groups:
+        if group_name not in group_filters:
+            print(f"\nWarning: Unknown group '{group_name}', skipping...")
+            continue
+
+        # Filter results for this group
+        group_results = [r for r in intermediate_results if group_filters[group_name](r)]
+
+        print(f"\n{'─' * 80}")
+        print(f"GROUP: {group_name.upper().replace('_', ' ')}")
+        print(f"Total in group: {len(group_results)}")
+        print(f"{'─' * 80}")
+
+        if not group_results:
+            print("  No examples in this group.")
+            continue
+
+        # Print up to n_examples from this group
+        for i, result in enumerate(group_results[:n_examples]):
+            print(f"\n  Example {i + 1}/{min(n_examples, len(group_results))}:")
+            print(f"  {'-' * 76}")
+            print(f"  Prompt (first 200 chars):")
+            print(f"    {result['prompt'][:200]}...")
+            print(f"\n  Expected Answer:")
+            print(f"    {result['answer']}")
+            print(f"\n  Model Output:")
+            print(f"    {result['output']}")
+            print(f"\n  Rewards:")
+            print(f"    Format: {result['format_reward']:.2f}")
+            print(f"    Answer: {result['answer_reward']:.2f}")
+            print(f"    Total:  {result['reward']:.2f}")
+
+        if len(group_results) > n_examples:
+            print(f"\n  ... and {len(group_results) - n_examples} more examples in this group")
+
+    print("\n" + "=" * 80)
+
+
 def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, str]]:
     """
     Load MATH dataset from parquet file(s).
