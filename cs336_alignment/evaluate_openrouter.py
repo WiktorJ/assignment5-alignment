@@ -65,12 +65,13 @@ def call_openrouter_api(
 
     result = response.json()
     content = result["choices"][0]["message"]["content"]
-    
+    print(result)
+
     # Add think tags if requested
     if add_think_tags and "<answer>" in content:
         # Add <think> at the beginning and </think> before <answer>
         content = "<think>" + content.replace("<answer>", "</think> <answer>", 1)
-    
+
     return content
 
 
@@ -176,14 +177,14 @@ def evaluate_openrouter(
 
 # Example usage
 if __name__ == "__main__":
-    # system_prompt = load_system_prompt("./cs336_alignment/prompts/deepseek_v3.prompt")
-    system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+    system_prompt = load_system_prompt("./cs336_alignment/prompts/deepseek_v3.prompt")
+    # system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
 
     # Using OpenRouter API
     # Set OPENROUTER_API_KEY environment variable before running
     results_openrouter = evaluate_openrouter(
-        # model="deepseek/deepseek-v3.2",
-        model="deepseek/deepseek-r1-0528",
+        model="deepseek/deepseek-v3.2",
+        # model="deepseek/deepseek-r1-0528",
         reward_fn=r1_zero_reward_fn,
         data=load_math_parquet_data(
             path="./data/MATH/data/test-00000-of-00001.parquet"
