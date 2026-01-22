@@ -1,6 +1,7 @@
 """
 Evaluation script for models via OpenRouter API.
 """
+
 from typing import Callable, List, Tuple
 import os
 import requests
@@ -75,6 +76,7 @@ def evaluate_openrouter(
     stop: List[str] | None = None,
     output_path: str | None = None,
     api_key: str | None = None,
+    data_limit: int | None = None,
 ):
     """
     Evaluate a language model via OpenRouter API on a dataset.
@@ -108,8 +110,10 @@ def evaluate_openrouter(
                 "OpenRouter API key must be provided either as a parameter or "
                 "via the OPENROUTER_API_KEY environment variable"
             )
-    
+
     questions, answers = zip(*data)
+    if data_limit:
+        questions, answers = questions[:data_limit], answers[:data_limit]
     # Interpolate each question into the system prompt
     prompts = [system_prompt.replace("{question}", question) for question in questions]
 
@@ -159,12 +163,14 @@ def evaluate_openrouter(
 
 # Example usage
 if __name__ == "__main__":
+    # system_prompt = load_system_prompt("./cs336_alignment/prompts/deepseek_v3.prompt")
     system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
 
     # Using OpenRouter API
     # Set OPENROUTER_API_KEY environment variable before running
     results_openrouter = evaluate_openrouter(
-        model="openai/gpt-4",
+        # model="deepseek/deepseek-v3.2",
+        model="deepseek/deepseek-r1-0528",
         reward_fn=r1_zero_reward_fn,
         data=load_math_parquet_data(
             path="./data/MATH/data/test-00000-of-00001.parquet"
@@ -173,7 +179,9 @@ if __name__ == "__main__":
         temperature=1.0,
         top_p=1.0,
         max_tokens=1024,
-        stop=["\n"],
+        stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
+        data_limit=2,
     )
-    print_example_results(results_openrouter, 10)
+
+    print_example_results(results_openrouter, 5)
