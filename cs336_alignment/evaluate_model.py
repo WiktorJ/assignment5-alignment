@@ -1,6 +1,8 @@
 from typing import Callable, List, Tuple
 import pandas as pd
 from pathlib import Path
+import json
+import requests
 from vllm import LLM, SamplingParams
 from drgrpo_grader import r1_zero_reward_fn
 
@@ -232,12 +234,187 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
     return results
 
 
+def call_openrouter_api(
+    prompt: str,
+    api_key: str,
+    model: str,
+    temperature: float = 1.0,
+    top_p: float = 1.0,
+    max_tokens: int = 1024,
+    stop: List[str] | None = None,
+) -> str:
+    """
+    Call OpenRouter API endpoint to generate a response.
+
+    Args:
+        prompt: The prompt to send to the model
+        api_key: OpenRouter API key
+        model: Model identifier (e.g., "openai/gpt-4")
+        temperature: Sampling temperature
+        top_p: Top-p sampling parameter
+        max_tokens: Maximum tokens to generate
+        stop: List of stop sequences
+
+    Returns:
+        The generated text response
+    """
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": max_tokens,
+    }
+    
+    if stop:
+        payload["stop"] = stop
+    
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
+
+
+def save_evaluation_results(
+    intermediate_results: List[dict],
+    output_path: str,
+) -> None:
+    """
+    Save evaluation results to a JSON file.
+
+    Args:
+        intermediate_results: List of result dictionaries containing prompts and outputs
+        output_path: Path to save the JSON file
+    """
+    # Extract only prompt and response for each result
+    output_data = [
+        {
+            "prompt": result["prompt"],
+            "response": result["output"],
+        }
+        for result in intermediate_results
+    ]
+    
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=2)
+    
+    print(f"\nSaved {len(output_data)} evaluation results to {output_path}")
+
+
+def evaluate_openrouter(
+    api_key: str,
+    model: str,
+    reward_fn: Callable[[str, str], dict[str, float]],
+    data: List[Tuple[str, str]],
+    system_prompt: str,
+    temperature: float = 1.0,
+    top_p: float = 1.0,
+    max_tokens: int = 1024,
+    stop: List[str] | None = None,
+    output_path: str | None = None,
+):
+    """
+    Evaluate a language model via OpenRouter API on a dataset.
+
+    Args:
+        api_key: OpenRouter API key
+        model: Model identifier (e.g., "openai/gpt-4")
+        reward_fn: Function that takes (output, answer) and returns dict with 'format_reward', 'answer_reward', 'reward'
+        data: List of (question, answer) tuples
+        system_prompt: System prompt template with {question} placeholder
+        temperature: Sampling temperature
+        top_p: Top-p sampling parameter
+        max_tokens: Maximum tokens to generate
+        stop: List of stop sequences
+        output_path: Optional path to save evaluation results as JSON
+
+    Returns:
+        Dictionary containing:
+            - intermediate_results: List of dicts with prompts, answers, outputs, and scores
+            - total_reward: Sum and accuracy for total reward
+            - format_reward: Sum and accuracy for format reward
+            - answer_reward: Sum and accuracy for answer reward
+            - format_reward_when_answer_zero: Sum and accuracy for format reward when answer reward is 0
+            - answer_reward_when_format_zero: Sum and accuracy for answer reward when format reward is 0
+    """
+    questions, answers = zip(*data)
+    # Interpolate each question into the system prompt
+    prompts = [system_prompt.replace("{question}", question) for question in questions]
+    
+    # Collect intermediate results
+    intermediate_results = []
+    for i, (prompt, answer) in enumerate(zip(prompts, answers)):
+        print(f"Processing {i+1}/{len(prompts)}...", end="\r")
+        
+        # Call OpenRouter API
+        output_text = call_openrouter_api(
+            prompt=prompt,
+            api_key=api_key,
+            model=model,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop,
+        )
+        
+        # Calculate reward
+        score = reward_fn(output_text, answer)
+        intermediate_results.append(
+            {
+                "prompt": prompt,
+                "answer": answer,
+                "output": output_text,
+                "format_reward": score["format_reward"],
+                "answer_reward": score["answer_reward"],
+                "reward": score["reward"],
+            }
+        )
+    
+    print()  # New line after progress indicator
+    
+    # Save results if output path is provided
+    if output_path:
+        save_evaluation_results(intermediate_results, output_path)
+
+    # Calculate metrics using helper functions
+    results = {
+        "intermediate_results": intermediate_results,
+        "total_reward": calculate_reward_metrics(intermediate_results, "reward"),
+        "format_reward": calculate_reward_metrics(
+            intermediate_results, "format_reward"
+        ),
+        "answer_reward": calculate_reward_metrics(
+            intermediate_results, "answer_reward"
+        ),
+        "format_reward_when_answer_zero": calculate_conditional_reward_metrics(
+            intermediate_results, "answer_reward", 0, "format_reward"
+        ),
+        "answer_reward_when_format_zero": calculate_conditional_reward_metrics(
+            intermediate_results, "format_reward", 0, "answer_reward"
+        ),
+    }
+
+    # Print summary
+    print_evaluation_summary(results)
+
+    return results
+
+
 def evaluate_llama(
     model: LLM,
     eval_sampling_params: SamplingParams,
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
     system_prompt: str,
+    output_path: str | None = None,
 ):
     """
     Evaluate a language model on a dataset.
@@ -248,7 +425,7 @@ def evaluate_llama(
         reward_fn: Function that takes (output, answer) and returns dict with 'format_reward', 'answer_reward', 'reward'
         data: List of (question, answer) tuples
         system_prompt: System prompt template with {question} placeholder
-        print_intermediate_results: Whether to print intermediate results
+        output_path: Optional path to save evaluation results as JSON
 
     Returns:
         Dictionary containing:
@@ -279,6 +456,10 @@ def evaluate_llama(
             }
         )
 
+    # Save results if output path is provided
+    if output_path:
+        save_evaluation_results(intermediate_results, output_path)
+
     # Calculate metrics using helper functions
     results = {
         "intermediate_results": intermediate_results,
@@ -303,16 +484,35 @@ def evaluate_llama(
     return results
 
 
-# Example usage:
-system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
-results = evaluate_llama(
-    model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
-    eval_sampling_params=SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
-    ),
-    reward_fn=r1_zero_reward_fn,
-    data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
-    system_prompt=system_prompt,
-)
-
-print_example_results(results, 10)
+# Example usage for vLLM:
+if __name__ == "__main__":
+    system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
+    
+    # Example 1: Using vLLM (local)
+    results = evaluate_llama(
+        model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
+        eval_sampling_params=SamplingParams(
+            temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+        ),
+        reward_fn=r1_zero_reward_fn,
+        data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+        system_prompt=system_prompt,
+        output_path="./evaluation_results_vllm.json",
+    )
+    print_example_results(results, 10)
+    
+    # Example 2: Using OpenRouter API
+    # Uncomment and set your API key to use
+    # results_openrouter = evaluate_openrouter(
+    #     api_key="YOUR_OPENROUTER_API_KEY",
+    #     model="openai/gpt-4",
+    #     reward_fn=r1_zero_reward_fn,
+    #     data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+    #     system_prompt=system_prompt,
+    #     temperature=1.0,
+    #     top_p=1.0,
+    #     max_tokens=1024,
+    #     stop=["\n"],
+    #     output_path="./evaluation_results_openrouter.json",
+    # )
+    # print_example_results(results_openrouter, 10)
