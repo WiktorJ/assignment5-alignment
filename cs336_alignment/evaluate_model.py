@@ -259,12 +259,12 @@ def call_openrouter_api(
         The generated text response
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
-    
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    
+
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -272,13 +272,13 @@ def call_openrouter_api(
         "top_p": top_p,
         "max_tokens": max_tokens,
     }
-    
+
     if stop:
         payload["stop"] = stop
-    
+
     response = requests.post(url, headers=headers, json=payload)
     response.raise_for_status()
-    
+
     result = response.json()
     return result["choices"][0]["message"]["content"]
 
@@ -302,10 +302,10 @@ def save_evaluation_results(
         }
         for result in intermediate_results
     ]
-    
+
     with open(output_path, "w") as f:
         json.dump(output_data, f, indent=2)
-    
+
     print(f"\nSaved {len(output_data)} evaluation results to {output_path}")
 
 
@@ -348,12 +348,12 @@ def evaluate_openrouter(
     questions, answers = zip(*data)
     # Interpolate each question into the system prompt
     prompts = [system_prompt.replace("{question}", question) for question in questions]
-    
+
     # Collect intermediate results
     intermediate_results = []
     for i, (prompt, answer) in enumerate(zip(prompts, answers)):
-        print(f"Processing {i+1}/{len(prompts)}...", end="\r")
-        
+        print(f"Processing {i + 1}/{len(prompts)}...", end="\r")
+
         # Call OpenRouter API
         output_text = call_openrouter_api(
             prompt=prompt,
@@ -364,7 +364,7 @@ def evaluate_openrouter(
             max_tokens=max_tokens,
             stop=stop,
         )
-        
+
         # Calculate reward
         score = reward_fn(output_text, answer)
         intermediate_results.append(
@@ -377,9 +377,9 @@ def evaluate_openrouter(
                 "reward": score["reward"],
             }
         )
-    
+
     print()  # New line after progress indicator
-    
+
     # Save results if output path is provided
     if output_path:
         save_evaluation_results(intermediate_results, output_path)
@@ -408,7 +408,7 @@ def evaluate_openrouter(
     return results
 
 
-def evaluate_llama(
+def evaluate_vllm(
     model: LLM,
     eval_sampling_params: SamplingParams,
     reward_fn: Callable[[str, str], dict[str, float]],
@@ -487,20 +487,22 @@ def evaluate_llama(
 # Example usage for vLLM:
 if __name__ == "__main__":
     system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
-    
+
     # Example 1: Using vLLM (local)
-    results = evaluate_llama(
+    results = evaluate_vllm(
         model=LLM(model="Qwen/Qwen2.5-Math-1.5B"),
         eval_sampling_params=SamplingParams(
             temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
         ),
         reward_fn=r1_zero_reward_fn,
-        data=load_math_parquet_data(path="./data/MATH/data/test-00000-of-00001.parquet"),
+        data=load_math_parquet_data(
+            path="./data/MATH/data/test-00000-of-00001.parquet"
+        ),
         system_prompt=system_prompt,
         output_path="./evaluation_results_vllm.json",
     )
     print_example_results(results, 10)
-    
+
     # Example 2: Using OpenRouter API
     # Uncomment and set your API key to use
     # results_openrouter = evaluate_openrouter(
