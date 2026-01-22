@@ -2,6 +2,7 @@
 Evaluation script for models via OpenRouter API.
 """
 from typing import Callable, List, Tuple
+import os
 import requests
 from evaluation_lib import (
     load_system_prompt,
@@ -64,7 +65,6 @@ def call_openrouter_api(
 
 
 def evaluate_openrouter(
-    api_key: str,
     model: str,
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
@@ -74,12 +74,12 @@ def evaluate_openrouter(
     max_tokens: int = 1024,
     stop: List[str] | None = None,
     output_path: str | None = None,
+    api_key: str | None = None,
 ):
     """
     Evaluate a language model via OpenRouter API on a dataset.
 
     Args:
-        api_key: OpenRouter API key
         model: Model identifier (e.g., "openai/gpt-4")
         reward_fn: Function that takes (output, answer) and returns dict with 'format_reward', 'answer_reward', 'reward'
         data: List of (question, answer) tuples
@@ -89,6 +89,7 @@ def evaluate_openrouter(
         max_tokens: Maximum tokens to generate
         stop: List of stop sequences
         output_path: Optional path to save evaluation results as JSON
+        api_key: OpenRouter API key (if None, reads from OPENROUTER_API_KEY environment variable)
 
     Returns:
         Dictionary containing:
@@ -99,6 +100,15 @@ def evaluate_openrouter(
             - format_reward_when_answer_zero: Sum and accuracy for format reward when answer reward is 0
             - answer_reward_when_format_zero: Sum and accuracy for answer reward when format reward is 0
     """
+    # Get API key from environment variable if not provided
+    if api_key is None:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if api_key is None:
+            raise ValueError(
+                "OpenRouter API key must be provided either as a parameter or "
+                "via the OPENROUTER_API_KEY environment variable"
+            )
+    
     questions, answers = zip(*data)
     # Interpolate each question into the system prompt
     prompts = [system_prompt.replace("{question}", question) for question in questions]
@@ -152,9 +162,8 @@ if __name__ == "__main__":
     system_prompt = load_system_prompt("./cs336_alignment/prompts/r1_zero.prompt")
 
     # Using OpenRouter API
-    # Set your API key to use
+    # Set OPENROUTER_API_KEY environment variable before running
     results_openrouter = evaluate_openrouter(
-        api_key="YOUR_OPENROUTER_API_KEY",
         model="openai/gpt-4",
         reward_fn=r1_zero_reward_fn,
         data=load_math_parquet_data(
