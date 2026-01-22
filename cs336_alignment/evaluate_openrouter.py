@@ -70,27 +70,30 @@ def call_openrouter_api(
     content = message["content"]
 
     # Handle reasoning field if check_reasoning is enabled
-    if check_reasoning:
-        reasoning = message.get("reasoning", "")
-        
+    if check_reasoning and "reasoning" in message and message["reasoning"]:
+        reasoning = message["reasoning"]
+
         # Wrap reasoning in <think> tags
-        think_section = f"<think>{reasoning}</think>" if reasoning else ""
-        
+        think_section = f"<think>{reasoning}</think>"
+
         # Check if content is already wrapped in <answer> tags
-        if "<answer>" in content and "</answer>" in content:
-            # Content already has answer tags, use as is
-            answer_section = content
-        else:
-            # Wrap content in <answer> tags
-            answer_section = f"<answer>{content}</answer>"
-        
+        if "<answer>" not in content:
+            content = f"<answer>{content}"
+        if "</answer>" not in content:
+            content = f"{content}</answer>"
+
         # Combine think and answer sections
-        return f"{think_section} {answer_section}".strip()
-    
+        return f"{think_section} {content}".strip()
+
     # Add think tags if requested (original behavior)
     if add_think_tags and "<answer>" in content:
         # Add <think> at the beginning and </think> before <answer>
-        content = "<think>" + content.replace("<answer>", "</think> <answer>", 1)
+        if "<think>" not in content:
+            content = f"<think>{content}"
+        if "</think>" not in content:
+            content = content.replace("<answer>", "</think> <answer>", 1)
+        if "</answer>" not in content:
+            content = f"{content}</answer>"
 
     return content
 
@@ -210,16 +213,16 @@ if __name__ == "__main__":
         # model="deepseek/deepseek-r1-0528",
         reward_fn=r1_zero_reward_fn,
         data=load_math_parquet_data(
-            path="./data/MATH/data/test-00000-of-00001.parquet"
+            path="./data/MATH/data/train-00000-of-00001.parquet"
         ),
         system_prompt=system_prompt,
         temperature=1.0,
         top_p=1.0,
-        max_tokens=1024,
+        max_tokens=2048,
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
-        data_limit=2,
-        add_think_tags=False,  # Disable for check_reasoning
+        data_limit=20,
+        add_think_tags=True,  # Disable for check_reasoning
         check_reasoning=True,  # Enable reasoning extraction
     )
 
