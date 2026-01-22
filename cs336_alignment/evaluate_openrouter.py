@@ -25,6 +25,7 @@ def call_openrouter_api(
     max_tokens: int = 1024,
     stop: List[str] | None = None,
     add_think_tags: bool = False,
+    check_reasoning: bool = False,
 ) -> str:
     """
     Call OpenRouter API endpoint to generate a response.
@@ -38,6 +39,7 @@ def call_openrouter_api(
         max_tokens: Maximum tokens to generate
         stop: List of stop sequences
         add_think_tags: If True, wraps response with <think> tags before <answer>
+        check_reasoning: If True, extracts reasoning field and formats as <think>reasoning</think> <answer>content</answer>
 
     Returns:
         The generated text response
@@ -64,10 +66,28 @@ def call_openrouter_api(
     response.raise_for_status()
 
     result = response.json()
-    content = result["choices"][0]["message"]["content"]
-    print(result)
+    message = result["choices"][0]["message"]
+    content = message["content"]
 
-    # Add think tags if requested
+    # Handle reasoning field if check_reasoning is enabled
+    if check_reasoning:
+        reasoning = message.get("reasoning", "")
+        
+        # Wrap reasoning in <think> tags
+        think_section = f"<think>{reasoning}</think>" if reasoning else ""
+        
+        # Check if content is already wrapped in <answer> tags
+        if "<answer>" in content and "</answer>" in content:
+            # Content already has answer tags, use as is
+            answer_section = content
+        else:
+            # Wrap content in <answer> tags
+            answer_section = f"<answer>{content}</answer>"
+        
+        # Combine think and answer sections
+        return f"{think_section} {answer_section}".strip()
+    
+    # Add think tags if requested (original behavior)
     if add_think_tags and "<answer>" in content:
         # Add <think> at the beginning and </think> before <answer>
         content = "<think>" + content.replace("<answer>", "</think> <answer>", 1)
@@ -88,6 +108,7 @@ def evaluate_openrouter(
     api_key: str | None = None,
     data_limit: int | None = None,
     add_think_tags: bool = False,
+    check_reasoning: bool = False,
 ):
     """
     Evaluate a language model via OpenRouter API on a dataset.
@@ -105,6 +126,7 @@ def evaluate_openrouter(
         api_key: OpenRouter API key (if None, reads from OPENROUTER_API_KEY environment variable)
         data_limit: Optional limit on number of examples to evaluate
         add_think_tags: If True, wraps response with <think> tags before <answer>
+        check_reasoning: If True, extracts reasoning field and formats as <think>reasoning</think> <answer>content</answer>
 
     Returns:
         Dictionary containing:
@@ -145,6 +167,7 @@ def evaluate_openrouter(
             max_tokens=max_tokens,
             stop=stop,
             add_think_tags=add_think_tags,
+            check_reasoning=check_reasoning,
         )
 
         # Calculate reward
@@ -196,7 +219,8 @@ if __name__ == "__main__":
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
         data_limit=2,
-        add_think_tags=True,  # Enable think tag wrapping
+        add_think_tags=False,  # Disable for check_reasoning
+        check_reasoning=True,  # Enable reasoning extraction
     )
 
     print_example_results(results_openrouter, 5)
