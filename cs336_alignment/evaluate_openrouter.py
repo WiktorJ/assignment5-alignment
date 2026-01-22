@@ -24,6 +24,7 @@ def call_openrouter_api(
     top_p: float = 1.0,
     max_tokens: int = 1024,
     stop: List[str] | None = None,
+    add_think_tags: bool = False,
 ) -> str:
     """
     Call OpenRouter API endpoint to generate a response.
@@ -36,6 +37,7 @@ def call_openrouter_api(
         top_p: Top-p sampling parameter
         max_tokens: Maximum tokens to generate
         stop: List of stop sequences
+        add_think_tags: If True, wraps response with <think> tags before <answer>
 
     Returns:
         The generated text response
@@ -62,7 +64,14 @@ def call_openrouter_api(
     response.raise_for_status()
 
     result = response.json()
-    return result["choices"][0]["message"]["content"]
+    content = result["choices"][0]["message"]["content"]
+    
+    # Add think tags if requested
+    if add_think_tags and "<answer>" in content:
+        # Add <think> at the beginning and </think> before <answer>
+        content = "<think>" + content.replace("<answer>", "</think> <answer>", 1)
+    
+    return content
 
 
 def evaluate_openrouter(
@@ -77,6 +86,7 @@ def evaluate_openrouter(
     output_path: str | None = None,
     api_key: str | None = None,
     data_limit: int | None = None,
+    add_think_tags: bool = False,
 ):
     """
     Evaluate a language model via OpenRouter API on a dataset.
@@ -92,6 +102,8 @@ def evaluate_openrouter(
         stop: List of stop sequences
         output_path: Optional path to save evaluation results as JSON
         api_key: OpenRouter API key (if None, reads from OPENROUTER_API_KEY environment variable)
+        data_limit: Optional limit on number of examples to evaluate
+        add_think_tags: If True, wraps response with <think> tags before <answer>
 
     Returns:
         Dictionary containing:
@@ -131,6 +143,7 @@ def evaluate_openrouter(
             top_p=top_p,
             max_tokens=max_tokens,
             stop=stop,
+            add_think_tags=add_think_tags,
         )
 
         # Calculate reward
@@ -182,6 +195,7 @@ if __name__ == "__main__":
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
         data_limit=2,
+        add_think_tags=True,  # Enable think tag wrapping
     )
 
     print_example_results(results_openrouter, 5)
