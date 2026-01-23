@@ -109,7 +109,8 @@ def evaluate_openrouter(
     stop: List[str] | None = None,
     output_path: str | None = None,
     api_key: str | None = None,
-    data_limit: int | None = None,
+    data_idx_start: int = 0,
+    data_idx_end: int | None = None,
     add_think_tags: bool = False,
     check_reasoning: bool = False,
 ):
@@ -150,8 +151,10 @@ def evaluate_openrouter(
             )
 
     questions, answers = zip(*data)
-    if data_limit:
-        questions, answers = questions[:data_limit], answers[:data_limit]
+    if data_idx_start:
+        questions, answers = questions[data_idx_start:], answers[data_idx_start:]
+    if data_idx_end:
+        questions, answers = questions[:data_idx_end], answers[:data_idx_end]
     # Interpolate each question into the system prompt
     prompts = [system_prompt.replace("{question}", question) for question in questions]
 
@@ -221,7 +224,8 @@ if __name__ == "__main__":
         max_tokens=2048,
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
-        data_limit=20,
+        data_idx_start=0,
+        data_idx_end=1000,
         add_think_tags=True,  # Disable for check_reasoning
         check_reasoning=True,  # Enable reasoning extraction
     )
