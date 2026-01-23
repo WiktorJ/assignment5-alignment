@@ -4,6 +4,8 @@ Evaluation script for models via OpenRouter API.
 
 from typing import Callable, List, Tuple
 import os
+import time
+import json
 import requests
 from evaluation_lib import (
     load_system_prompt,
@@ -26,9 +28,10 @@ def call_openrouter_api(
     stop: List[str] | None = None,
     add_think_tags: bool = False,
     check_reasoning: bool = False,
+    max_retries: int = 3,
 ) -> str:
     """
-    Call OpenRouter API endpoint to generate a response.
+    Call OpenRouter API endpoint to generate a response with retry logic.
 
     Args:
         prompt: The prompt to send to the model
@@ -40,9 +43,13 @@ def call_openrouter_api(
         stop: List of stop sequences
         add_think_tags: If True, wraps response with <think> tags before <answer>
         check_reasoning: If True, extracts reasoning field and formats as <think>reasoning</think> <answer>content</answer>
+        max_retries: Maximum number of retry attempts
 
     Returns:
         The generated text response
+    
+    Raises:
+        Exception: If all retry attempts fail
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -62,10 +69,22 @@ def call_openrouter_api(
     if stop:
         payload["stop"] = stop
 
-    response = requests.post(url, headers=headers, json=payload)
-    response.raise_for_status()
-
-    result = response.json()
+    # Retry logic with exponential backoff
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            break  # Success, exit retry loop
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                print(f"\nAPI call failed (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                # All retries exhausted
+                raise Exception(f"API call failed after {max_retries} attempts: {e}")
     message = result["choices"][0]["message"]
     content = message["content"]
 
@@ -160,26 +179,28 @@ def evaluate_openrouter(
 
     # Collect intermediate results
     intermediate_results = []
+    
     for i, (prompt, answer) in enumerate(zip(prompts, answers)):
-        print(f"Processing {i + 1}/{len(prompts)}...", end="\r")
+        actual_index = data_idx_start + i  # Track actual index in original dataset
+        print(f"Processing {i + 1}/{len(prompts)} (index {actual_index})...", end="\r")
 
-        # Call OpenRouter API
-        output_text = call_openrouter_api(
-            prompt=prompt,
-            api_key=api_key,
-            model=model,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            stop=stop,
-            add_think_tags=add_think_tags,
-            check_reasoning=check_reasoning,
-        )
+        try:
+            # Call OpenRouter API with retry logic
+            output_text = call_openrouter_api(
+                prompt=prompt,
+                api_key=api_key,
+                model=model,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stop=stop,
+                add_think_tags=add_think_tags,
+                check_reasoning=check_reasoning,
+            )
 
-        # Calculate reward
-        score = reward_fn(output_text, answer)
-        intermediate_results.append(
-            {
+            # Calculate reward
+            score = reward_fn(output_text, answer)
+            result = {
                 "prompt": prompt,
                 "answer": answer,
                 "output": output_text,
@@ -187,13 +208,26 @@ def evaluate_openrouter(
                 "answer_reward": score["answer_reward"],
                 "reward": score["reward"],
             }
-        )
+            intermediate_results.append(result)
+            
+            # Save results incrementally after each successful call
+            if output_path:
+                save_evaluation_results(intermediate_results, output_path)
+                
+        except Exception as e:
+            print(f"\n\nFATAL ERROR at index {actual_index}: {e}")
+            print(f"Failed to process example at index {actual_index} after all retries.")
+            print(f"To resume, restart with data_idx_start={actual_index}")
+            
+            # Save what we have so far
+            if output_path and intermediate_results:
+                save_evaluation_results(intermediate_results, output_path)
+                print(f"Saved {len(intermediate_results)} results before failure.")
+            
+            # Exit the program
+            raise SystemExit(1)
 
     print()  # New line after progress indicator
-
-    # Save results if output path is provided
-    if output_path:
-        save_evaluation_results(intermediate_results, output_path)
 
     # Calculate metrics using helper functions
     results = compute_evaluation_metrics(intermediate_results)
@@ -225,8 +259,8 @@ if __name__ == "__main__":
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
         data_idx_start=0,
-        data_idx_end=1000,
-        add_think_tags=True,  # Disable for check_reasoning
+        data_idx_end=10,
+        add_think_tags=False,  # Disable for check_reasoning
         check_reasoning=True,  # Enable reasoning extraction
     )
 
