@@ -221,11 +221,6 @@ def evaluate_openrouter(
             )
             print(f"To resume, restart with data_idx_start={actual_index}")
 
-            # Save what we have so far
-            if output_path and intermediate_results:
-                save_evaluation_results(intermediate_results, output_path)
-                print(f"Saved {len(intermediate_results)} results before failure.")
-
             # Exit the program
             raise SystemExit(1)
 
