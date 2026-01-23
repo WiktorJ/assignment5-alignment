@@ -1,6 +1,7 @@
 """
 Common evaluation utilities shared across different evaluation methods.
 """
+
 from typing import Callable, List, Tuple
 import pandas as pd
 from pathlib import Path
@@ -235,13 +236,13 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 
 
 def save_evaluation_results(
-    intermediate_results: List[dict] | dict,
+    results: List[dict] | dict,
     output_path: str,
     append: bool = False,
 ) -> None:
     """
     Save evaluation results to a JSONL file (one JSON object per line).
-    
+
     Args:
         intermediate_results: Either a list of result dictionaries or a single result dictionary.
                             All provided results will be saved.
@@ -249,17 +250,15 @@ def save_evaluation_results(
         append: If True, append to existing file. If False, overwrite the file.
     """
     # Normalize input to always be a list
-    if isinstance(intermediate_results, dict):
-        results_list = [intermediate_results]
-    else:
-        results_list = intermediate_results
-    
+    if isinstance(results, dict):
+        results = [results]
+
     # Determine file mode
     mode = "a" if append else "w"
-    
+
     # Write all results
     with open(output_path, mode) as f:
-        for result in results_list:
+        for result in results:
             output_item = {
                 "prompt": result["prompt"],
                 "response": result["output"],

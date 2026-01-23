@@ -255,11 +255,11 @@ if __name__ == "__main__":
         top_p=1.0,
         max_tokens=2048,
         stop=["</answer>"],
-        output_path="./evaluation_results_openrouter.jsonl",
+        output_path="./evaluation_results_openrouter.json",
         data_idx_start=0,
-        data_idx_end=10,
-        add_think_tags=False,  # Disable for check_reasoning
-        check_reasoning=True,  # Enable reasoning extraction
+        data_idx_end=1000,
+        add_think_tags=True,
+        check_reasoning=True,
     )
 
-    print_example_results(results_openrouter, 5)
+    print_example_results(results_openrouter, 3)
