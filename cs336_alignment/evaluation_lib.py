@@ -235,44 +235,36 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 
 
 def save_evaluation_results(
-    intermediate_results: List[dict],
+    intermediate_results: List[dict] | dict,
     output_path: str,
-    append_only_last: bool = True,
+    append: bool = False,
 ) -> None:
     """
     Save evaluation results to a JSONL file (one JSON object per line).
     
-    By default, only appends the last result to the file for efficiency.
-    If the file doesn't exist or append_only_last is False, writes all results.
-
     Args:
-        intermediate_results: List of result dictionaries containing prompts and outputs
+        intermediate_results: Either a list of result dictionaries or a single result dictionary.
+                            All provided results will be saved.
         output_path: Path to save the JSONL file
-        append_only_last: If True, only append the last result (efficient for incremental saves).
-                         If False, rewrite entire file with all results.
+        append: If True, append to existing file. If False, overwrite the file.
     """
-    from pathlib import Path
+    # Normalize input to always be a list
+    if isinstance(intermediate_results, dict):
+        results_list = [intermediate_results]
+    else:
+        results_list = intermediate_results
     
-    file_exists = Path(output_path).exists()
+    # Determine file mode
+    mode = "a" if append else "w"
     
-    if append_only_last and file_exists and len(intermediate_results) > 0:
-        # Append only the last result
-        with open(output_path, "a") as f:
-            result = intermediate_results[-1]
+    # Write all results
+    with open(output_path, mode) as f:
+        for result in results_list:
             output_item = {
                 "prompt": result["prompt"],
                 "response": result["output"],
             }
             f.write(json.dumps(output_item) + "\n")
-    else:
-        # Write all results (file doesn't exist or full rewrite requested)
-        with open(output_path, "w") as f:
-            for result in intermediate_results:
-                output_item = {
-                    "prompt": result["prompt"],
-                    "response": result["output"],
-                }
-                f.write(json.dumps(output_item) + "\n")
 
 
 def compute_evaluation_metrics(

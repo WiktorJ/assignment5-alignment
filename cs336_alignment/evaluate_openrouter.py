@@ -212,7 +212,8 @@ def evaluate_openrouter(
 
             # Save results incrementally after each successful call
             if output_path:
-                save_evaluation_results(intermediate_results, output_path)
+                # Save only the new result, appending to file
+                save_evaluation_results(result, output_path, append=True)
 
         except Exception as e:
             print(f"\n\nFATAL ERROR at index {actual_index}: {e}")
