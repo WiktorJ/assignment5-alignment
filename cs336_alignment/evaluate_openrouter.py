@@ -47,7 +47,7 @@ def call_openrouter_api(
 
     Returns:
         The generated text response
-    
+
     Raises:
         Exception: If all retry attempts fail
     """
@@ -78,7 +78,7 @@ def call_openrouter_api(
             break  # Success, exit retry loop
         except Exception as e:
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
                 print(f"\nAPI call failed (attempt {attempt + 1}/{max_retries}): {e}")
                 print(f"Retrying in {wait_time} seconds...")
                 time.sleep(wait_time)
@@ -179,7 +179,7 @@ def evaluate_openrouter(
 
     # Collect intermediate results
     intermediate_results = []
-    
+
     for i, (prompt, answer) in enumerate(zip(prompts, answers)):
         actual_index = data_idx_start + i  # Track actual index in original dataset
         print(f"Processing {i + 1}/{len(prompts)} (index {actual_index})...", end="\r")
@@ -209,21 +209,23 @@ def evaluate_openrouter(
                 "reward": score["reward"],
             }
             intermediate_results.append(result)
-            
+
             # Save results incrementally after each successful call
             if output_path:
                 save_evaluation_results(intermediate_results, output_path)
-                
+
         except Exception as e:
             print(f"\n\nFATAL ERROR at index {actual_index}: {e}")
-            print(f"Failed to process example at index {actual_index} after all retries.")
+            print(
+                f"Failed to process example at index {actual_index} after all retries."
+            )
             print(f"To resume, restart with data_idx_start={actual_index}")
-            
+
             # Save what we have so far
             if output_path and intermediate_results:
                 save_evaluation_results(intermediate_results, output_path)
                 print(f"Saved {len(intermediate_results)} results before failure.")
-            
+
             # Exit the program
             raise SystemExit(1)
 
