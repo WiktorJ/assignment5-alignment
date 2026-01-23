@@ -237,26 +237,42 @@ def load_math_parquet_data(path: str = "./data/MATH/data") -> List[tuple[str, st
 def save_evaluation_results(
     intermediate_results: List[dict],
     output_path: str,
+    append_only_last: bool = True,
 ) -> None:
     """
     Save evaluation results to a JSONL file (one JSON object per line).
     
-    This function rewrites the entire file each time to ensure consistency.
-    While not the most efficient for large datasets, it's safe and simple.
+    By default, only appends the last result to the file for efficiency.
+    If the file doesn't exist or append_only_last is False, writes all results.
 
     Args:
         intermediate_results: List of result dictionaries containing prompts and outputs
         output_path: Path to save the JSONL file
+        append_only_last: If True, only append the last result (efficient for incremental saves).
+                         If False, rewrite entire file with all results.
     """
-    # JSONL format: one JSON object per line
-    # Rewrite entire file to ensure consistency
-    with open(output_path, "w") as f:
-        for result in intermediate_results:
+    from pathlib import Path
+    
+    file_exists = Path(output_path).exists()
+    
+    if append_only_last and file_exists and len(intermediate_results) > 0:
+        # Append only the last result
+        with open(output_path, "a") as f:
+            result = intermediate_results[-1]
             output_item = {
                 "prompt": result["prompt"],
                 "response": result["output"],
             }
             f.write(json.dumps(output_item) + "\n")
+    else:
+        # Write all results (file doesn't exist or full rewrite requested)
+        with open(output_path, "w") as f:
+            for result in intermediate_results:
+                output_item = {
+                    "prompt": result["prompt"],
+                    "response": result["output"],
+                }
+                f.write(json.dumps(output_item) + "\n")
 
 
 def compute_evaluation_metrics(
