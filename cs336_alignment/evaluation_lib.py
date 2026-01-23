@@ -239,25 +239,24 @@ def save_evaluation_results(
     output_path: str,
 ) -> None:
     """
-    Save evaluation results to a JSON file.
+    Save evaluation results to a JSONL file (one JSON object per line).
+    
+    This function rewrites the entire file each time to ensure consistency.
+    While not the most efficient for large datasets, it's safe and simple.
 
     Args:
         intermediate_results: List of result dictionaries containing prompts and outputs
-        output_path: Path to save the JSON file
+        output_path: Path to save the JSONL file
     """
-    # Extract only prompt and response for each result
-    output_data = [
-        {
-            "prompt": result["prompt"],
-            "response": result["output"],
-        }
-        for result in intermediate_results
-    ]
-
+    # JSONL format: one JSON object per line
+    # Rewrite entire file to ensure consistency
     with open(output_path, "w") as f:
-        json.dump(output_data, f, indent=2)
-
-    print(f"\nSaved {len(output_data)} evaluation results to {output_path}")
+        for result in intermediate_results:
+            output_item = {
+                "prompt": result["prompt"],
+                "response": result["output"],
+            }
+            f.write(json.dumps(output_item) + "\n")
 
 
 def compute_evaluation_metrics(
