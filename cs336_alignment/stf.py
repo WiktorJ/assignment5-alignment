@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import re
 import torch
+from torch.autograd import grad
 import torch.nn.functional as F
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
@@ -12,6 +14,7 @@ import json
 import pandas as pd
 import wandb
 from torch.optim import AdamW
+from drgrpo_grader import r1_zero_reward_fn
 
 
 @dataclass
@@ -23,13 +26,15 @@ class TrainConfig:
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
+    gradient_accumulation_steps: int = 4
     max_length: int = 512
     temperature: float = 1.0
     top_p: float = 1.0
     learning_rate: float = 1e-5
     num_epochs: int = 1
     gradient_accumulation_steps: int = 1
-    log_interval: int = 10
+    train_log_interval: int = 10
+    eval_log_interval: int = 20
 
 
 
@@ -121,7 +126,7 @@ def masked_normalize(
     return (tensor * mask).sum(dim=dim) / normalize_constant
 
 
-def stf_microbatch_train_step(
+def sft_microbatch_train_step(
     policy_log_probs: torch.Tensor,
     response_mask: torch.Tensor,
     gradient_accumulation_steps: int,
@@ -142,7 +147,7 @@ def stf_microbatch_train_step(
     return loss, {}
 
 
-def log_generations(
+def compute_eval_metrics(
     hf_model: PreTrainedModel,
     vllm_model: LLM,
     tokenizer: PreTrainedTokenizerBase,
@@ -352,57 +357,61 @@ def train(config: TrainConfig):
     global_step = 0
     
     for epoch in range(config.num_epochs):
+        train_data = [train_data[i] for i in torch.randperm(len(train_data))]
         for batch_idx in range(0, len(train_data), config.batch_size):
             # Get batch
             batch_data = train_data[batch_idx:batch_idx + config.batch_size]
             prompts = [item[0] for item in batch_data]
             responses = [item[1] for item in batch_data]
-            
-            # Tokenize
-            tokenized = tokenize_prompt_and_output(prompts, responses, tokenizer)
-            input_ids = tokenized["input_ids"].to(config.device)
-            labels = tokenized["labels"].to(config.device)
-            response_mask = tokenized["response_mask"].to(config.device)
-            
-            # Get log probabilities
-            response_output = get_response_log_probs(
-                hf_model,
-                input_ids,
-                labels,
-                return_token_entropy=True
-            )
-            policy_log_probs = response_output["log_probs"]
-            
-            # Compute loss and backward
-            loss, metrics = stf_microbatch_train_step(
-                policy_log_probs,
-                response_mask,
-                config.gradient_accumulation_steps,
-                normalize_constant=response_mask.sum(dim=-1)
-            )
-            
-            # Update weights
-            if (global_step + 1) % config.gradient_accumulation_steps == 0:
-                optimizer.step()
+             
+            tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            input_ids = tokenized_data["input_ids"]
+            labels = tokenized_data["labels"]
+            response_mask = tokenized_data["response_mask"]
+
+            probs = get_response_log_probs(hf_model, input_ids, labels, return_token_entropy=True)
+            log_probs = probs["log_probs"]
+            entropy = probs["entropy"]
+
+            loss, train_metrics = sft_microbatch_train_step(log_probs, 
+                                                            response_mask,
+                                                            gradient_accumulation_steps=config.gradient_accumulation_steps)
+            if global_step % config.gradient_accumulation_steps == 0:
                 optimizer.zero_grad()
+                optimizer.step()
             
-            # Log metrics
-            if global_step % config.log_interval == 0:
-                avg_entropy = masked_normalize(
-                    tensor=response_output["token_entropy"],
-                    mask=response_mask,
-                    normalize_constant=response_mask.sum(dim=-1),
-                    dim=-1
-                ).mean()
-                
+            if config.train_log_interval > 0 and global_step % config.train_log_interval == 0:
+                avg_entropy = masked_normalize(entropy,
+                                               response_mask,
+                                               dim=-1,
+                                               normalize_constant=response_mask.sum(dim=-1)).mean().item()
                 wandb.log({
-                    "train_step": global_step,
-                    "train/loss": loss.item() * config.gradient_accumulation_steps,
-                    "train/entropy": avg_entropy.item(),
+                    "train/avg_entropy": avg_entropy,
+                    "train/avg_loss": loss.item() * config.gradient_accumulation_steps,
+                    "train/step": global_step,
                     "train/epoch": epoch,
+                    **train_metrics
                 })
+            if config.eval_log_interval > 0 and global_step % config.eval_log_interval == 0:
+                with torch.no_grad():
+                    load_policy_into_vllm_instance(hf_model, vllm_model)
+                    eval_metrics = compute_eval_metrics(
+                        hf_model=hf_model,
+                        vllm_model=vllm_model,
+                        tokenizer=tokenizer,
+                        data=eval_data,
+                        reward_fn=r1_zero_reward_fn,
+                        batch_size=config.batch_size,
+                        max_length=config.max_length,
+                        temperature=config.temperature,
+                        top_p=config.top_p,
+                    )
+                    wandb.log(eval_metrics)
+
+
+
             
-            global_step += 1
+            
 
 
 if __name__ == "__main__":
