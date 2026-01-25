@@ -8,6 +8,7 @@ from evaluate_model import evaluate_vllm
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from unittest.mock import patch
 import tyro
+import json
 
 
 @dataclass
@@ -230,6 +231,23 @@ def log_generations(
     }
 
 
+def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
+    """Load data from a JSON file containing 'prompt' and 'response' fields.
+    
+    Args:
+        file_path: Path to the JSON file
+        
+    Returns:
+        List of tuples where each tuple contains (prompt, response)
+    """
+    data = []
+    with open(file_path, 'r') as f:
+        for line in f:
+            item = json.loads(line.strip())
+            data.append((item['prompt'], item['response']))
+    return data
+
+
 def init_vllm(
     model_id: str,
     device: str,
@@ -272,7 +290,7 @@ def train(config: TrainConfig):
     vllm_model = init_vllm(model_id, device=config.device, dtype=config.dtype, seed=config.seed, seed=config.seed)
     hf_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=getattr(torch, config.dtype), device_map=config.device, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    # Write a function that reads json file that contains tow fieields: "prompt" and "response". The data should be read into list of tuples AI!
+    data = load_prompt_response_data(config.data_path)
 
 
 if __name__ == "__main__":
