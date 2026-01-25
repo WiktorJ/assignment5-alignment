@@ -15,7 +15,8 @@ import json
 class TrainConfig:
     seed: int = 42
     device: str = "cuda"
-    data_path: str = "data/mathqa.jsonl"
+    train_data_path: str = "data/mathqa.json"
+    eval_data_path: str = "data/mathqa.json"
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
@@ -290,7 +291,8 @@ def train(config: TrainConfig):
     vllm_model = init_vllm(model_id, device=config.device, dtype=config.dtype, seed=config.seed, seed=config.seed)
     hf_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=getattr(torch, config.dtype), device_map=config.device, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    data = load_prompt_response_data(config.data_path)
+    data = load_prompt_response_data(config.train_data_path)
+    # Improve the data loading, check the extension and if file is jsonl use the current function and if it's parquet write a new function to lado it in the same format. There are alos eval and train datasets AI!
 
 
 if __name__ == "__main__":
