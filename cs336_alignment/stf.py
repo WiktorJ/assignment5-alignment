@@ -11,6 +11,7 @@ import tyro
 import json
 import pandas as pd
 import wandb
+from torch.optim import AdamW
 
 
 @dataclass
@@ -25,6 +26,10 @@ class TrainConfig:
     max_length: int = 512
     temperature: float = 1.0
     top_p: float = 1.0
+    learning_rate: float = 1e-5
+    num_epochs: int = 1
+    gradient_accumulation_steps: int = 1
+    log_interval: int = 10
 
 
 
@@ -332,14 +337,72 @@ def train(config: TrainConfig):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(config.train_data_path)
     eval_data = load_prompt_response_data(config.eval_data_path)
+    
     # Setup wandb metrics 
-    wandb.define_metric("train_step") # the x‑axis for training 
-    wandb.define_metric("eval_step") # the x‑axis for evaluation 
-    # everything that starts with train/ is tied to train_step 
-    wandb.define_metric("train/*", step_metric="train_step") 
-    # everything that starts with eval/ is tied to eval_step 
+    wandb.define_metric("train_step")
+    wandb.define_metric("eval_step")
+    wandb.define_metric("train/*", step_metric="train_step")
     wandb.define_metric("eval/*", step_metric="eval_step")
-    # Write a basic training loop that iterates over batch_size batches of data AI!
+    
+    # Setup optimizer
+    optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
+    
+    # Training loop
+    hf_model.train()
+    global_step = 0
+    
+    for epoch in range(config.num_epochs):
+        for batch_idx in range(0, len(train_data), config.batch_size):
+            # Get batch
+            batch_data = train_data[batch_idx:batch_idx + config.batch_size]
+            prompts = [item[0] for item in batch_data]
+            responses = [item[1] for item in batch_data]
+            
+            # Tokenize
+            tokenized = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            input_ids = tokenized["input_ids"].to(config.device)
+            labels = tokenized["labels"].to(config.device)
+            response_mask = tokenized["response_mask"].to(config.device)
+            
+            # Get log probabilities
+            response_output = get_response_log_probs(
+                hf_model,
+                input_ids,
+                labels,
+                return_token_entropy=True
+            )
+            policy_log_probs = response_output["log_probs"]
+            
+            # Compute loss and backward
+            loss, metrics = stf_microbatch_train_step(
+                policy_log_probs,
+                response_mask,
+                config.gradient_accumulation_steps,
+                normalize_constant=response_mask.sum(dim=-1)
+            )
+            
+            # Update weights
+            if (global_step + 1) % config.gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            
+            # Log metrics
+            if global_step % config.log_interval == 0:
+                avg_entropy = masked_normalize(
+                    tensor=response_output["token_entropy"],
+                    mask=response_mask,
+                    normalize_constant=response_mask.sum(dim=-1),
+                    dim=-1
+                ).mean()
+                
+                wandb.log({
+                    "train_step": global_step,
+                    "train/loss": loss.item() * config.gradient_accumulation_steps,
+                    "train/entropy": avg_entropy.item(),
+                    "train/epoch": epoch,
+                })
+            
+            global_step += 1
 
 
 if __name__ == "__main__":
