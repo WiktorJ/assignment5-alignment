@@ -9,6 +9,8 @@ from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from unittest.mock import patch
 import tyro
 import json
+import pandas as pd
+import wandb
 
 
 @dataclass
@@ -258,7 +260,6 @@ def load_prompt_response_data_parquet(file_path: str) -> list[Tuple[str, str]]:
     Returns:
         List of tuples where each tuple contains (prompt, response)
     """
-    import pandas as pd
     
     df = pd.read_parquet(file_path)
     data = [(row['prompt'], row['response']) for _, row in df.iterrows()]
@@ -331,6 +332,14 @@ def train(config: TrainConfig):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(config.train_data_path)
     eval_data = load_prompt_response_data(config.eval_data_path)
+    # Setup wandb metrics 
+    wandb.define_metric("train_step") # the x‑axis for training 
+    wandb.define_metric("eval_step") # the x‑axis for evaluation 
+    # everything that starts with train/ is tied to train_step 
+    wandb.define_metric("train/*", step_metric="train_step") 
+    # everything that starts with eval/ is tied to eval_step 
+    wandb.define_metric("eval/*", step_metric="eval_step")
+    # Write a basic training loop that iterates over batch_size batches of data AI!
 
 
 if __name__ == "__main__":
