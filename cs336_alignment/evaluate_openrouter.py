@@ -256,7 +256,7 @@ if __name__ == "__main__":
         max_tokens=2048,
         stop=["</answer>"],
         output_path="./evaluation_results_openrouter.json",
-        data_idx_start=180,
+        data_idx_start=796,
         data_idx_end=1000,
         add_think_tags=True,
         check_reasoning=True,

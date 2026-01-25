@@ -1,6 +1,7 @@
 """
 Evaluation script for models using vLLM.
 """
+
 from typing import Callable, List, Tuple
 from vllm import LLM, SamplingParams
 from evaluation_lib import (
@@ -19,7 +20,7 @@ def evaluate_vllm(
     eval_sampling_params: SamplingParams,
     reward_fn: Callable[[str, str], dict[str, float]],
     data: List[Tuple[str, str]],
-    system_prompt: str,
+    system_prompt: str | None = None,
     output_path: str | None = None,
 ):
     """
@@ -44,7 +45,12 @@ def evaluate_vllm(
     """
     questions, answers = zip(*data)
     # Interpolate each question into the system prompt
-    prompts = [system_prompt.replace("{question}", question) for question in questions]
+    if system_prompt:
+        prompts = [
+            system_prompt.replace("{question}", question) for question in questions
+        ]
+    else:
+        prompts = questions
     outputs = model.generate(prompts, eval_sampling_params)
 
     # Collect intermediate results

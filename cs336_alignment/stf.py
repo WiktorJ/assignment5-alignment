@@ -1,6 +1,9 @@
 import torch
 import torch.nn.functional as F
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from vllm import LLM, SamplingParams
+from typing import Callable, Any, Tuple
+from evaluate_model import evaluate_vllm
 
 
 def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
@@ -80,3 +83,130 @@ def get_response_log_probs(
         token_entropy = compute_entropy(logits)  # B x SL
         ret["token_entropy"] = token_entropy
     return ret
+
+
+def masked_normalize(
+    tensor: torch.Tensor,
+    mask: torch.Tensor,
+    dim: int | None = None,
+    normalize_constant: float | torch.Tensor = 1.0,
+) -> torch.Tensor:
+    return (tensor * mask).sum(dim=dim) / normalize_constant
+
+
+def stf_microbatch_train_step(
+    policy_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    gradient_accumulation_steps: int,
+    normalize_constant: float | None = 1.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def loss_fn(policy_log_probs, response_mask, normalize_constant):
+        return -masked_normalize(
+            tensor=policy_log_probs,
+            mask=response_mask,
+            normalize_constant=normalize_constant,
+            dim=-1,
+        )
+
+    loss = loss_fn(policy_log_probs, response_mask, normalize_constant).mean() / (
+        gradient_accumulation_steps
+    )
+    loss.backward()
+    return loss, {}
+
+
+def log_generations(
+    hf_model: PreTrainedModel,
+    vllm_model: LLM,
+    tokenizer: PreTrainedTokenizerBase,
+    data: list[Tuple[str, str]],
+    reward_fn: Callable[[str, str], dict[str, float]],
+    batch_size: int,
+    max_length: int,
+    temperature: float,
+    top_p: float,
+) -> dict["str", Any]:
+    """Log generations from a model to a file."""
+    logs = []
+    for i in range(0, len(data), batch_size):
+        sampling_params = SamplingParams(
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_length,
+            stop=["</answer>"],
+        )
+        eval_results = evaluate_vllm(
+            vllm_model, sampling_params, reward_fn, data[i : i + batch_size]
+        )
+        gt_answers = [res["answer"] for res in eval_results["intermediate_results"]]
+        answers = [res["output"] for res in eval_results["intermediate_results"]]
+        prompts = [res["prompt"] for res in eval_results["intermediate_results"]]
+        format_rewards = [
+            res["format_reward"] for res in eval_results["intermediate_results"]
+        ]
+        answer_rewards = [
+            res["answer_reward"] for res in eval_results["intermediate_results"]
+        ]
+        total_rewards = [res["reward"] for res in eval_results["intermediate_results"]]
+
+        tokenized_output = tokenize_prompt_and_output(prompts, answers, tokenizer)
+        avg_entropy = torch.zeros(
+            tokenized_output["response_mask"].shape[0],
+            device=tokenized_output["response_mask"].device,
+        )
+        avg_log_probs = torch.zeros(
+            tokenized_output["response_mask"].shape[0],
+            device=tokenized_output["response_mask"].device,
+        )
+        response_output = get_response_log_probs(
+            hf_model,
+            tokenized_output["input_ids"],
+            tokenized_output["labels"],
+            return_token_entropy=True,
+        )
+        avg_entropy = masked_normalize(
+            tensor=response_output["token_entropy"],
+            mask=tokenized_output["response_mask"],
+            normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
+            dim=-1,
+        )
+        avg_log_probs = masked_normalize(
+            tensor=response_output["log_probs"],
+            mask=tokenized_output["response_mask"],
+            normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
+            dim=-1,
+        )
+        for j in range(len(prompts)):
+            logs.append(
+                {
+                    "prompt": prompts[j],
+                    "gt_answer": gt_answers[j],
+                    "answer": answers[j],
+                    "response_length": len(answers[j]),
+                    "format_reward": format_rewards[j],
+                    "answer_reward": answer_rewards[j],
+                    "total_reward": total_rewards[j],
+                    "entropy": avg_entropy[j].item(),
+                    "log_probs": avg_log_probs[j].item(),
+                }
+            )
+    avg_response_len = torch.mean(
+        torch.tensor([log["response_length"] for log in logs])
+    )
+    avg_correct_resp_len = torch.mean(
+        torch.tensor(
+            [log["response_length"] for log in logs if log["total_reward"] > 0]
+        )
+    )
+    avg_incorrect_resp_len = torch.mean(
+        torch.tensor(
+            [log["response_length"] for log in logs if log["total_reward"] == 0]
+        )
+    )
+
+    return {
+        "full_logs": logs,
+        "avg_response_len": avg_response_len.item(),
+        "avg_correct_resp_len": avg_correct_resp_len.item(),
+        "avg_incorrect_resp_len": avg_incorrect_resp_len.item(),
+    }
