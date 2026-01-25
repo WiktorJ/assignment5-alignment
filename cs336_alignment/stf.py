@@ -232,11 +232,11 @@ def log_generations(
     }
 
 
-def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
-    """Load data from a JSON file containing 'prompt' and 'response' fields.
+def load_prompt_response_data_jsonl(file_path: str) -> list[Tuple[str, str]]:
+    """Load data from a JSONL file containing 'prompt' and 'response' fields.
     
     Args:
-        file_path: Path to the JSON file
+        file_path: Path to the JSONL file
         
     Returns:
         List of tuples where each tuple contains (prompt, response)
@@ -247,6 +247,44 @@ def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
             item = json.loads(line.strip())
             data.append((item['prompt'], item['response']))
     return data
+
+
+def load_prompt_response_data_parquet(file_path: str) -> list[Tuple[str, str]]:
+    """Load data from a Parquet file containing 'prompt' and 'response' fields.
+    
+    Args:
+        file_path: Path to the Parquet file
+        
+    Returns:
+        List of tuples where each tuple contains (prompt, response)
+    """
+    import pandas as pd
+    
+    df = pd.read_parquet(file_path)
+    data = [(row['prompt'], row['response']) for _, row in df.iterrows()]
+    return data
+
+
+def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
+    """Load data from a file containing 'prompt' and 'response' fields.
+    
+    Supports both JSONL and Parquet file formats. The format is determined by the file extension.
+    
+    Args:
+        file_path: Path to the data file (.jsonl or .parquet)
+        
+    Returns:
+        List of tuples where each tuple contains (prompt, response)
+        
+    Raises:
+        ValueError: If the file extension is not supported
+    """
+    if file_path.endswith('.jsonl'):
+        return load_prompt_response_data_jsonl(file_path)
+    elif file_path.endswith('.parquet'):
+        return load_prompt_response_data_parquet(file_path)
+    else:
+        raise ValueError(f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}")
 
 
 def init_vllm(
@@ -291,8 +329,8 @@ def train(config: TrainConfig):
     vllm_model = init_vllm(model_id, device=config.device, dtype=config.dtype, seed=config.seed, seed=config.seed)
     hf_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=getattr(torch, config.dtype), device_map=config.device, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    data = load_prompt_response_data(config.train_data_path)
-    # Improve the data loading, check the extension and if file is jsonl use the current function and if it's parquet write a new function to lado it in the same format. There are alos eval and train datasets AI!
+    train_data = load_prompt_response_data(config.train_data_path)
+    eval_data = load_prompt_response_data(config.eval_data_path)
 
 
 if __name__ == "__main__":
