@@ -156,7 +156,7 @@ def sft_microbatch_train_step(
 
 
 def compute_eval_metrics(
-    hf_model: PreTrainedModel,
+    hf_model: PreTrainedModel | None,
     vllm_model: LLM,
     tokenizer: PreTrainedTokenizerBase,
     data: list[Tuple[str, str]],
@@ -189,47 +189,42 @@ def compute_eval_metrics(
         ]
         total_rewards = [res["reward"] for res in eval_results["intermediate_results"]]
 
-        tokenized_output = tokenize_prompt_and_output(prompts, answers, tokenizer)
-        avg_entropy = torch.zeros(
-            tokenized_output["response_mask"].shape[0],
-            device=tokenized_output["response_mask"].device,
-        )
-        avg_log_probs = torch.zeros(
-            tokenized_output["response_mask"].shape[0],
-            device=tokenized_output["response_mask"].device,
-        )
-        response_output = get_response_log_probs(
-            hf_model,
-            tokenized_output["input_ids"],
-            tokenized_output["labels"],
-            return_token_entropy=True,
-        )
-        avg_entropy = masked_normalize(
-            tensor=response_output["token_entropy"],
-            mask=tokenized_output["response_mask"],
-            normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
-            dim=-1,
-        )
-        avg_log_probs = masked_normalize(
-            tensor=response_output["log_probs"],
-            mask=tokenized_output["response_mask"],
-            normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
-            dim=-1,
-        )
-        for j in range(len(prompts)):
-            logs.append(
-                {
-                    "prompt": prompts[j],
-                    "gt_answer": gt_answers[j],
-                    "answer": answers[j],
-                    "response_length": len(answers[j]),
-                    "format_reward": format_rewards[j],
-                    "answer_reward": answer_rewards[j],
-                    "total_reward": total_rewards[j],
-                    "entropy": avg_entropy[j].item(),
-                    "log_probs": avg_log_probs[j].item(),
-                }
+        # Only compute entropy/log_probs if HF model is provided
+        if hf_model is not None:
+            tokenized_output = tokenize_prompt_and_output(prompts, answers, tokenizer)
+            response_output = get_response_log_probs(
+                hf_model,
+                tokenized_output["input_ids"],
+                tokenized_output["labels"],
+                return_token_entropy=True,
             )
+            avg_entropy = masked_normalize(
+                tensor=response_output["token_entropy"],
+                mask=tokenized_output["response_mask"],
+                normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
+                dim=-1,
+            )
+            avg_log_probs = masked_normalize(
+                tensor=response_output["log_probs"],
+                mask=tokenized_output["response_mask"],
+                normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
+                dim=-1,
+            )
+        
+        for j in range(len(prompts)):
+            log_entry = {
+                "prompt": prompts[j],
+                "gt_answer": gt_answers[j],
+                "answer": answers[j],
+                "response_length": len(answers[j]),
+                "format_reward": format_rewards[j],
+                "answer_reward": answer_rewards[j],
+                "total_reward": total_rewards[j],
+            }
+            if hf_model is not None:
+                log_entry["entropy"] = avg_entropy[j].item()
+                log_entry["log_probs"] = avg_log_probs[j].item()
+            logs.append(log_entry)
     avg_response_len = torch.mean(
         torch.tensor([log["response_length"] for log in logs])
     )
@@ -456,9 +451,28 @@ def train(config: TrainConfig):
                 and global_step % config.eval_log_interval == 0
             ):
                 with torch.no_grad():
-                    load_policy_into_vllm_instance(hf_model, vllm_model)
+                    # Save model state and unload HF model to free GPU memory
+                    print("Saving HF model state and unloading...")
+                    model_state_dict = hf_model.state_dict()
+                    del hf_model
+                    torch.cuda.empty_cache()
+                    
+                    # Load vLLM model for evaluation
+                    print("Loading vLLM model for evaluation...")
+                    vllm_model = init_vllm(
+                        model_id,
+                        device=config.device,
+                        dtype=config.dtype,
+                        seed=config.seed,
+                        gpu_memory_utilization=config.gpu_memory_utilization,
+                    )
+                    
+                    # Load the trained weights into vLLM
+                    llm_model = vllm_model.llm_engine.model_executor.driver_worker.model_runner.model
+                    llm_model.load_weights(model_state_dict.items())
+                    
                     eval_metrics = compute_eval_metrics(
-                        hf_model=hf_model,
+                        hf_model=None,  # We don't need HF model for eval
                         vllm_model=vllm_model,
                         tokenizer=tokenizer,
                         data=eval_data,
@@ -469,6 +483,24 @@ def train(config: TrainConfig):
                         top_p=config.top_p,
                     )
                     wandb.log(eval_metrics)
+                    
+                    # Unload vLLM model
+                    print("Unloading vLLM model...")
+                    del vllm_model
+                    torch.cuda.empty_cache()
+                    
+                    # Reload HF model for continued training
+                    print("Reloading HF model for training...")
+                    hf_model = AutoModelForCausalLM.from_pretrained(
+                        model_id,
+                        torch_dtype=getattr(torch, config.dtype),
+                        device_map=config.device,
+                        trust_remote_code=True,
+                    )
+                    hf_model.load_state_dict(model_state_dict)
+                    hf_model.train()
+                    del model_state_dict
+                    torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
