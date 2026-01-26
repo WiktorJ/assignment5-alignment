@@ -210,7 +210,7 @@ def compute_eval_metrics(
                 normalize_constant=tokenized_output["response_mask"].sum(dim=-1),
                 dim=-1,
             )
-        
+
         for j in range(len(prompts)):
             log_entry = {
                 "prompt": prompts[j],
@@ -349,22 +349,18 @@ def init_vllm(
         )
 
 
-def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
+def load_policy_into_vllm_instance(policy: PreTrainedModel | dict, llm: LLM):
     """Copied from https://github.com/huggingface/trl/blob/ 22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py#L670."""
-    state_dict = policy.state_dict()
+    if isinstance(policy, PreTrainedModel):
+        state_dict = policy.state_dict()
+    else:
+        state_dict = policy
     llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
     llm_model.load_weights(state_dict.items())
 
 
 def train(config: TrainConfig):
     model_id = "Qwen/Qwen2.5-Math-1.5B"
-    vllm_model = init_vllm(
-        model_id,
-        device=config.device,
-        dtype=config.dtype,
-        seed=config.seed,
-        gpu_memory_utilization=config.gpu_memory_utilization,
-    )
     hf_model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=getattr(torch, config.dtype),
@@ -456,7 +452,7 @@ def train(config: TrainConfig):
                     model_state_dict = hf_model.state_dict()
                     del hf_model
                     torch.cuda.empty_cache()
-                    
+
                     # Load vLLM model for evaluation
                     print("Loading vLLM model for evaluation...")
                     vllm_model = init_vllm(
@@ -466,11 +462,10 @@ def train(config: TrainConfig):
                         seed=config.seed,
                         gpu_memory_utilization=config.gpu_memory_utilization,
                     )
-                    
+
                     # Load the trained weights into vLLM
-                    llm_model = vllm_model.llm_engine.model_executor.driver_worker.model_runner.model
-                    llm_model.load_weights(model_state_dict.items())
-                    
+                    load_policy_into_vllm_instance(model_state_dict, vllm_model)
+
                     eval_metrics = compute_eval_metrics(
                         hf_model=None,  # We don't need HF model for eval
                         vllm_model=vllm_model,
@@ -483,12 +478,12 @@ def train(config: TrainConfig):
                         top_p=config.top_p,
                     )
                     wandb.log(eval_metrics)
-                    
+
                     # Unload vLLM model
                     print("Unloading vLLM model...")
                     del vllm_model
                     torch.cuda.empty_cache()
-                    
+
                     # Reload HF model for continued training
                     print("Reloading HF model for training...")
                     hf_model = AutoModelForCausalLM.from_pretrained(
