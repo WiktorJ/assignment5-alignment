@@ -1,7 +1,4 @@
 from dataclasses import dataclass
-import re
-import torch
-from torch.autograd import grad
 import torch.nn.functional as F
 from transformers import (
     PreTrainedModel,
@@ -18,6 +15,7 @@ import tyro
 import json
 import pandas as pd
 import wandb
+import torch
 from torch.optim import AdamW
 from drgrpo_grader import r1_zero_reward_fn
 import bitsandbytes as bnb  # Import the library
@@ -33,9 +31,9 @@ class TrainConfig:
     train_response_column: str = "response"
     eval_prompt_column: str = "problem"
     eval_response_column: str = "answer"
-    gpu_memory_utilization: float = 0.85
+    gpu_memory_utilization: float = 0.9
     dtype: str = "bfloat16"
-    batch_size: int = 16
+    batch_size: int = 1
     gradient_accumulation_steps: int = 4
     max_length: int = 512
     temperature: float = 1.0
@@ -43,7 +41,7 @@ class TrainConfig:
     learning_rate: float = 1e-5
     num_epochs: int = 1
     train_log_interval: int = 10
-    eval_log_interval: int = 20
+    eval_log_interval: int = 0
     attn_implementation: str = "flash_attention_2"
     use_8bit_adamw: bool = True
 
@@ -395,6 +393,7 @@ def train(config: TrainConfig):
         trust_remote_code=True,
         attn_implementation=config.attn_implementation,
     )
+    hf_model.gradient_checkpointing_enable()
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(
         config.train_data_path, config.train_prompt_column, config.train_response_column
@@ -403,7 +402,7 @@ def train(config: TrainConfig):
         config.eval_data_path, config.eval_prompt_column, config.eval_response_column
     )
 
-    wandb.init(mode="offline")
+    wandb.init(mode="offline", sync_tensorboard=True)
     # Setup wandb metrics
     wandb.define_metric("train_step")
     wandb.define_metric("eval_step")
@@ -412,7 +411,7 @@ def train(config: TrainConfig):
 
     # Setup optimizer
     if config.use_8bit_adamw:
-        optimizer = bnb.optim.Adam8bit(hf_model.parameters(), lr=config.learning_rate)
+        optimizer = bnb.optim.AdamW8bit(hf_model.parameters(), lr=config.learning_rate)
     else:
         optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
 
@@ -421,15 +420,19 @@ def train(config: TrainConfig):
     global_step = 0
 
     for epoch in range(config.num_epochs):
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"Starting Epoch {epoch + 1}/{config.num_epochs}")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
         train_data = [train_data[i] for i in torch.randperm(len(train_data))]
         num_batches = (len(train_data) + config.batch_size - 1) // config.batch_size
-        
+
         for batch_idx in range(0, len(train_data), config.batch_size):
             current_batch = batch_idx // config.batch_size + 1
-            print(f"\rEpoch {epoch + 1}/{config.num_epochs} | Batch {current_batch}/{num_batches} | Step {global_step}", end="", flush=True)
+            print(
+                f"\rEpoch {epoch + 1}/{config.num_epochs} | Batch {current_batch}/{num_batches} | Step {global_step}",
+                end="",
+                flush=True,
+            )
             # Get batch
             batch_data = train_data[batch_idx : batch_idx + config.batch_size]
             prompts = [item[0] for item in batch_data]
@@ -457,8 +460,8 @@ def train(config: TrainConfig):
             )
             if global_step % config.gradient_accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(hf_model.parameters(), max_norm=1.0)
-                optimizer.zero_grad()
                 optimizer.step()
+                optimizer.zero_grad(set_to_none=True))
 
             if (
                 config.train_log_interval > 0
@@ -475,7 +478,9 @@ def train(config: TrainConfig):
                     .item()
                 )
                 avg_loss = loss.item() * config.gradient_accumulation_steps
-                print(f"\n[Train Log] Step {global_step} | Loss: {avg_loss:.4f} | Entropy: {avg_entropy:.4f}")
+                print(
+                    f"\n[Train Log] Step {global_step} | Loss: {avg_loss:.4f} | Entropy: {avg_entropy:.4f}"
+                )
                 wandb.log(
                     {
                         "train/avg_entropy": avg_entropy,
@@ -491,9 +496,9 @@ def train(config: TrainConfig):
             ):
                 with torch.no_grad():
                     # Save model state and unload HF model to free GPU memory
-                    print(f"\n\n{'='*80}")
+                    print(f"\n\n{'=' * 80}")
                     print(f"Running Evaluation at Step {global_step}")
-                    print(f"{'='*80}")
+                    print(f"{'=' * 80}")
                     print("Saving HF model state and unloading...")
                     model_state_dict = hf_model.state_dict()
                     del hf_model
@@ -524,10 +529,16 @@ def train(config: TrainConfig):
                         top_p=config.top_p,
                     )
                     print(f"\n[Eval Results] Step {global_step}")
-                    print(f"  Avg Response Length: {eval_metrics.get('avg_response_len', 'N/A'):.2f}")
-                    print(f"  Avg Correct Response Length: {eval_metrics.get('avg_correct_resp_len', 'N/A'):.2f}")
-                    print(f"  Avg Incorrect Response Length: {eval_metrics.get('avg_incorrect_resp_len', 'N/A'):.2f}")
-                    print(f"{'='*80}\n")
+                    print(
+                        f"  Avg Response Length: {eval_metrics.get('avg_response_len', 'N/A'):.2f}"
+                    )
+                    print(
+                        f"  Avg Correct Response Length: {eval_metrics.get('avg_correct_resp_len', 'N/A'):.2f}"
+                    )
+                    print(
+                        f"  Avg Incorrect Response Length: {eval_metrics.get('avg_incorrect_resp_len', 'N/A'):.2f}"
+                    )
+                    print(f"{'=' * 80}\n")
                     wandb.log(eval_metrics)
 
                     # Unload vLLM model
@@ -548,16 +559,16 @@ def train(config: TrainConfig):
                     hf_model.train()
                     del model_state_dict
                     torch.cuda.empty_cache()
-            
+
             global_step += 1
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Completed Epoch {epoch + 1}/{config.num_epochs}")
-        print(f"{'='*80}\n")
-    
-    print(f"\n{'='*80}")
+        print(f"{'=' * 80}\n")
+
+    print(f"\n{'=' * 80}")
     print("Training Complete!")
-    print(f"{'='*80}\n")
+    print(f"{'=' * 80}\n")
 
 
 if __name__ == "__main__":
