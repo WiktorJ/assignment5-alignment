@@ -116,6 +116,7 @@ def get_response_log_probs(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     return_token_entropy: bool,
+    inference_mode: bool = False,
 ) -> dict[str, torch.Tensor]:
     device = torch.device(
         "cuda"
@@ -128,10 +129,15 @@ def get_response_log_probs(
     input_ids = input_ids.to(device)
     labels = labels.to(device)
 
-    model.eval()
-    with torch.inference_mode():
+    if inference_mode:
+        model.eval()
+        with torch.inference_mode():
+            outputs = model(input_ids)
+            logits = outputs.logits
+    else:
         outputs = model(input_ids)
         logits = outputs.logits
+        
     log_probs = F.log_softmax(logits, dim=-1)  # B x SL x V
     response_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(
         -1
@@ -215,6 +221,7 @@ def compute_eval_metrics(
                 tokenized_output["input_ids"],
                 tokenized_output["labels"],
                 return_token_entropy=True,
+                inference_mode=True,
             )
             avg_entropy = masked_normalize(
                 tensor=response_output["token_entropy"],
@@ -421,7 +428,7 @@ def train(config: TrainConfig):
             response_mask = tokenized_data["response_mask"]
 
             probs = get_response_log_probs(
-                hf_model, input_ids, labels, return_token_entropy=True
+                hf_model, input_ids, labels, return_token_entropy=True, inference_mode=False
             )
             log_probs = probs["log_probs"]
             entropy = probs["token_entropy"]
