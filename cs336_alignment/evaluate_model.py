@@ -4,7 +4,7 @@ Evaluation script for models using vLLM.
 
 from typing import Callable, List, Tuple
 from vllm import LLM, SamplingParams
-from evaluation_lib import (
+from cs336_alignment.evaluation_lib import (
     load_system_prompt,
     load_math_parquet_data,
     save_evaluation_results,
@@ -12,7 +12,7 @@ from evaluation_lib import (
     print_evaluation_summary,
     print_example_results,
 )
-from drgrpo_grader import r1_zero_reward_fn
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
 
 def evaluate_vllm(

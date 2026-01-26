@@ -8,7 +8,7 @@ from transformers import (
 )
 from vllm import LLM, SamplingParams
 from typing import Callable, Any, Tuple
-from evaluate_model import evaluate_vllm
+from cs336_alignment.evaluate_model import evaluate_vllm
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from unittest.mock import patch
 import tyro
@@ -17,7 +17,7 @@ import pandas as pd
 import wandb
 import torch
 from torch.optim import AdamW
-from drgrpo_grader import r1_zero_reward_fn
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 import bitsandbytes as bnb  # Import the library
 
 
