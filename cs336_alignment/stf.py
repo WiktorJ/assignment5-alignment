@@ -26,8 +26,8 @@ from drgrpo_grader import r1_zero_reward_fn
 class TrainConfig:
     seed: int = 42
     device: str = "cuda"
-    train_data_path: str = "data/mathqa.json"
-    eval_data_path: str = "data/mathqa.json"
+    train_data_path: str = "data/MATH/data/evaluation_results_openrouter.jsonl"
+    eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
