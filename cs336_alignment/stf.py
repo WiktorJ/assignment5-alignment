@@ -377,6 +377,7 @@ def train(config: TrainConfig):
                                                             response_mask,
                                                             gradient_accumulation_steps=config.gradient_accumulation_steps)
             if global_step % config.gradient_accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(hf_model.parameters(), max_norm=1.0)
                 optimizer.zero_grad()
                 optimizer.step()
             
