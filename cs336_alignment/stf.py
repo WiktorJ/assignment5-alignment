@@ -28,6 +28,8 @@ class TrainConfig:
     device: str = "cuda"
     train_data_path: str = "data/MATH/data/evaluation_results_openrouter.jsonl"
     eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
+    prompt_column: str = "prompt"
+    response_column: str = "response"
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
@@ -248,11 +250,15 @@ def compute_eval_metrics(
     }
 
 
-def load_prompt_response_data_jsonl(file_path: str) -> list[Tuple[str, str]]:
-    """Load data from a JSONL file containing 'prompt' and 'response' fields.
+def load_prompt_response_data_jsonl(
+    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
+) -> list[Tuple[str, str]]:
+    """Load data from a JSONL file containing prompt and response fields.
 
     Args:
         file_path: Path to the JSONL file
+        prompt_column: Name of the column containing prompts
+        response_column: Name of the column containing responses
 
     Returns:
         List of tuples where each tuple contains (prompt, response)
@@ -261,32 +267,40 @@ def load_prompt_response_data_jsonl(file_path: str) -> list[Tuple[str, str]]:
     with open(file_path, "r") as f:
         for line in f:
             item = json.loads(line.strip())
-            data.append((item["prompt"], item["response"]))
+            data.append((item[prompt_column], item[response_column]))
     return data
 
 
-def load_prompt_response_data_parquet(file_path: str) -> list[Tuple[str, str]]:
-    """Load data from a Parquet file containing 'prompt' and 'response' fields.
+def load_prompt_response_data_parquet(
+    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
+) -> list[Tuple[str, str]]:
+    """Load data from a Parquet file containing prompt and response fields.
 
     Args:
         file_path: Path to the Parquet file
+        prompt_column: Name of the column containing prompts
+        response_column: Name of the column containing responses
 
     Returns:
         List of tuples where each tuple contains (prompt, response)
     """
 
     df = pd.read_parquet(file_path)
-    data = [(row["prompt"], row["response"]) for _, row in df.iterrows()]
+    data = [(row[prompt_column], row[response_column]) for _, row in df.iterrows()]
     return data
 
 
-def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
-    """Load data from a file containing 'prompt' and 'response' fields.
+def load_prompt_response_data(
+    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
+) -> list[Tuple[str, str]]:
+    """Load data from a file containing prompt and response fields.
 
     Supports both JSONL and Parquet file formats. The format is determined by the file extension.
 
     Args:
         file_path: Path to the data file (.jsonl or .parquet)
+        prompt_column: Name of the column containing prompts
+        response_column: Name of the column containing responses
 
     Returns:
         List of tuples where each tuple contains (prompt, response)
@@ -295,9 +309,9 @@ def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
         ValueError: If the file extension is not supported
     """
     if file_path.endswith(".jsonl"):
-        return load_prompt_response_data_jsonl(file_path)
+        return load_prompt_response_data_jsonl(file_path, prompt_column, response_column)
     elif file_path.endswith(".parquet"):
-        return load_prompt_response_data_parquet(file_path)
+        return load_prompt_response_data_parquet(file_path, prompt_column, response_column)
     else:
         raise ValueError(
             f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}"
@@ -357,9 +371,12 @@ def train(config: TrainConfig):
         trust_remote_code=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    # It should be possible to pass what are the names of two columns in train and eval datasets AI!
-    train_data = load_prompt_response_data(config.train_data_path)
-    eval_data = load_prompt_response_data(config.eval_data_path)
+    train_data = load_prompt_response_data(
+        config.train_data_path, config.prompt_column, config.response_column
+    )
+    eval_data = load_prompt_response_data(
+        config.eval_data_path, config.prompt_column, config.response_column
+    )
 
     # Setup wandb metrics
     wandb.define_metric("train_step")
