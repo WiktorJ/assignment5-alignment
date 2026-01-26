@@ -421,8 +421,15 @@ def train(config: TrainConfig):
     global_step = 0
 
     for epoch in range(config.num_epochs):
+        print(f"\n{'='*80}")
+        print(f"Starting Epoch {epoch + 1}/{config.num_epochs}")
+        print(f"{'='*80}")
         train_data = [train_data[i] for i in torch.randperm(len(train_data))]
+        num_batches = (len(train_data) + config.batch_size - 1) // config.batch_size
+        
         for batch_idx in range(0, len(train_data), config.batch_size):
+            current_batch = batch_idx // config.batch_size + 1
+            print(f"\rEpoch {epoch + 1}/{config.num_epochs} | Batch {current_batch}/{num_batches} | Step {global_step}", end="", flush=True)
             # Get batch
             batch_data = train_data[batch_idx : batch_idx + config.batch_size]
             prompts = [item[0] for item in batch_data]
@@ -467,11 +474,12 @@ def train(config: TrainConfig):
                     .mean()
                     .item()
                 )
+                avg_loss = loss.item() * config.gradient_accumulation_steps
+                print(f"\n[Train Log] Step {global_step} | Loss: {avg_loss:.4f} | Entropy: {avg_entropy:.4f}")
                 wandb.log(
                     {
                         "train/avg_entropy": avg_entropy,
-                        "train/avg_loss": loss.item()
-                        * config.gradient_accumulation_steps,
+                        "train/avg_loss": avg_loss,
                         "train/step": global_step,
                         "train/epoch": epoch,
                         **train_metrics,
@@ -483,6 +491,9 @@ def train(config: TrainConfig):
             ):
                 with torch.no_grad():
                     # Save model state and unload HF model to free GPU memory
+                    print(f"\n\n{'='*80}")
+                    print(f"Running Evaluation at Step {global_step}")
+                    print(f"{'='*80}")
                     print("Saving HF model state and unloading...")
                     model_state_dict = hf_model.state_dict()
                     del hf_model
@@ -512,6 +523,11 @@ def train(config: TrainConfig):
                         temperature=config.temperature,
                         top_p=config.top_p,
                     )
+                    print(f"\n[Eval Results] Step {global_step}")
+                    print(f"  Avg Response Length: {eval_metrics.get('avg_response_len', 'N/A'):.2f}")
+                    print(f"  Avg Correct Response Length: {eval_metrics.get('avg_correct_resp_len', 'N/A'):.2f}")
+                    print(f"  Avg Incorrect Response Length: {eval_metrics.get('avg_incorrect_resp_len', 'N/A'):.2f}")
+                    print(f"{'='*80}\n")
                     wandb.log(eval_metrics)
 
                     # Unload vLLM model
@@ -532,6 +548,16 @@ def train(config: TrainConfig):
                     hf_model.train()
                     del model_state_dict
                     torch.cuda.empty_cache()
+            
+            global_step += 1
+        
+        print(f"\n{'='*80}")
+        print(f"Completed Epoch {epoch + 1}/{config.num_epochs}")
+        print(f"{'='*80}\n")
+    
+    print(f"\n{'='*80}")
+    print("Training Complete!")
+    print(f"{'='*80}\n")
 
 
 if __name__ == "__main__":
