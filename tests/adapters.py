@@ -10,10 +10,14 @@ from transformers import PreTrainedTokenizerBase
 
 from cs336_alignment.stf import (
     masked_normalize,
-    stf_microbatch_train_step,
+    sft_microbatch_train_step,
     tokenize_prompt_and_output,
     compute_entropy,
     get_response_log_probs,
+)
+
+from cs336_alignment.grpo import (
+    compute_group_normalized_rewards,
 )
 
 
@@ -85,7 +89,14 @@ def run_compute_group_normalized_rewards(
                 You may choose what you wish to log here
                 (some statistics of the rewards, etc.).
     """
-    raise NotImplementedError
+    return compute_group_normalized_rewards(
+        reward_fn,
+        rollout_responses,
+        repeated_ground_truths,
+        group_size,
+        advantage_eps,
+        normalize_by_std,
+    )
 
 
 def run_compute_entropy(logits: torch.Tensor) -> torch.Tensor:
@@ -213,7 +224,7 @@ def run_sft_microbatch_train_step(
     normalize_constant: int | None = 1.0,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute the policy gradient loss and backprop its gradients for a microbatch."""
-    return stf_microbatch_train_step(
+    return sft_microbatch_train_step(
         policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant
     )
 
