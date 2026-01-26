@@ -25,7 +25,9 @@ import bitsandbytes as bnb  # Import the library
 class TrainConfig:
     seed: int = 42
     device: str = "cuda"
-    train_data_path: str = "data/MATH/data/deepseek_generated_train_data_max_len_1024_2048.jsonl"
+    train_data_path: str = (
+        "data/MATH/data/deepseek_generated_train_data_max_len_1024_2048.jsonl"
+    )
     eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
     train_prompt_column: str = "prompt"
     train_response_column: str = "response"
@@ -461,7 +463,7 @@ def train(config: TrainConfig):
             if global_step % config.gradient_accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(hf_model.parameters(), max_norm=1.0)
                 optimizer.step()
-                optimizer.zero_grad(set_to_none=True))
+                optimizer.zero_grad(set_to_none=True)
 
             if (
                 config.train_log_interval > 0
