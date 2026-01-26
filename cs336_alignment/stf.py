@@ -357,6 +357,7 @@ def train(config: TrainConfig):
         trust_remote_code=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    # It should be possible to pass what are the names of two columns in train and eval datasets AI!
     train_data = load_prompt_response_data(config.train_data_path)
     eval_data = load_prompt_response_data(config.eval_data_path)
 
