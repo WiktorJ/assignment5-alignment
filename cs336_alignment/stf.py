@@ -47,6 +47,13 @@ class TrainConfig:
 
 
 def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     tokenized_prompts = [
         tokenizer.encode(prompt, return_tensors="pt").squeeze()
         for prompt in prompt_strs
@@ -62,8 +69,12 @@ def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
         torch.cat((p, o), dim=0) for p, o in zip(tokenized_prompts, tokenized_outputs)
     ]
     max_len = max([len(t) for t in tokenized_inputs])
-    labels = torch.full((len(tokenized_inputs), max_len), tokenizer.pad_token_id)
-    input_ids = torch.full((len(tokenized_inputs), max_len), tokenizer.pad_token_id)
+    labels = torch.full((len(tokenized_inputs), max_len), tokenizer.pad_token_id).to(
+        device
+    )
+    input_ids = torch.full((len(tokenized_inputs), max_len), tokenizer.pad_token_id).to(
+        device
+    )
 
     for i, t in enumerate(tokenized_inputs):
         input_ids[i, : len(t)] = t
@@ -76,9 +87,16 @@ def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
     output_lens = torch.asarray([len(o) for o in tokenized_outputs])
 
     reponse_mask = (
-        (torch.arange(1, labels.shape[1] + 1) >= prompt_lens[:, None])
-        & (torch.arange(1, labels.shape[1] + 1) < (prompt_lens + output_lens)[:, None])
-    ).int()
+        (
+            (torch.arange(1, labels.shape[1] + 1) >= prompt_lens[:, None])
+            & (
+                torch.arange(1, labels.shape[1] + 1)
+                < (prompt_lens + output_lens)[:, None]
+            )
+        )
+        .int()
+        .to(device)
+    )
     return {
         "input_ids": input_ids,
         "labels": labels,
