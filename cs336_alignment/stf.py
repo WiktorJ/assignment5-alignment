@@ -30,8 +30,8 @@ class TrainConfig:
     eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
     train_prompt_column: str = "prompt"
     train_response_column: str = "response"
-    eval_prompt_column: str = "prompt"
-    eval_response_column: str = "response"
+    eval_prompt_column: str = "problem"
+    eval_response_column: str = "answer"
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
@@ -311,9 +311,13 @@ def load_prompt_response_data(
         ValueError: If the file extension is not supported
     """
     if file_path.endswith(".jsonl"):
-        return load_prompt_response_data_jsonl(file_path, prompt_column, response_column)
+        return load_prompt_response_data_jsonl(
+            file_path, prompt_column, response_column
+        )
     elif file_path.endswith(".parquet"):
-        return load_prompt_response_data_parquet(file_path, prompt_column, response_column)
+        return load_prompt_response_data_parquet(
+            file_path, prompt_column, response_column
+        )
     else:
         raise ValueError(
             f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}"
