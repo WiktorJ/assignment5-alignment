@@ -20,6 +20,7 @@ import pandas as pd
 import wandb
 from torch.optim import AdamW
 from drgrpo_grader import r1_zero_reward_fn
+import bitsandbytes as bnb  # Import the library
 
 
 @dataclass
@@ -41,9 +42,10 @@ class TrainConfig:
     top_p: float = 1.0
     learning_rate: float = 1e-5
     num_epochs: int = 1
-    gradient_accumulation_steps: int = 1
     train_log_interval: int = 10
     eval_log_interval: int = 20
+    attn_implementation: str = "flash_attention_2"
+    use_8bit_adamw: bool = True
 
 
 def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
@@ -137,7 +139,7 @@ def get_response_log_probs(
     else:
         outputs = model(input_ids)
         logits = outputs.logits
-        
+
     log_probs = F.log_softmax(logits, dim=-1)  # B x SL x V
     response_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(
         -1
@@ -391,6 +393,7 @@ def train(config: TrainConfig):
         torch_dtype=getattr(torch, config.dtype),
         device_map=config.device,
         trust_remote_code=True,
+        attn_implementation=config.attn_implementation,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(
@@ -408,9 +411,12 @@ def train(config: TrainConfig):
     wandb.define_metric("eval/*", step_metric="eval_step")
 
     # Setup optimizer
-    optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
+    if config.use_8bit_adamw:
+        optimizer = bnb.optim.Adam8bit(hf_model.parameters(), lr=config.learning_rate)
+    else:
+        optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
 
-    # Training loop
+    # Training loop/
     hf_model.train()
     global_step = 0
 
@@ -428,7 +434,11 @@ def train(config: TrainConfig):
             response_mask = tokenized_data["response_mask"]
 
             probs = get_response_log_probs(
-                hf_model, input_ids, labels, return_token_entropy=True, inference_mode=False
+                hf_model,
+                input_ids,
+                labels,
+                return_token_entropy=True,
+                inference_mode=False,
             )
             log_probs = probs["log_probs"]
             entropy = probs["token_entropy"]
@@ -516,6 +526,7 @@ def train(config: TrainConfig):
                         torch_dtype=getattr(torch, config.dtype),
                         device_map=config.device,
                         trust_remote_code=True,
+                        attn_implementation=config.attn_implementation,
                     )
                     hf_model.load_state_dict(model_state_dict)
                     hf_model.train()
