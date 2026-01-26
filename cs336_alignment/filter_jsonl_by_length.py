@@ -16,7 +16,7 @@ def filter_jsonl_by_length(
     min_response_length: Optional[int] = None,
     max_response_length: Optional[int] = None,
     prompt_field: str = "prompt",
-    response_field: str = "output",
+    response_field: str = "response",
 ):
     """
     Filter JSONL file based on prompt and/or response length.
@@ -33,33 +33,35 @@ def filter_jsonl_by_length(
     """
     filtered_count = 0
     total_count = 0
-    
+
     with open(input_path, "r") as infile, open(output_path, "w") as outfile:
         for line in infile:
             total_count += 1
             item = json.loads(line.strip())
-            
+
             # Get prompt and response
             prompt = item.get(prompt_field, "")
             response = item.get(response_field, "")
-            
+
             # Check prompt length constraints
             if min_prompt_length is not None and len(prompt) < min_prompt_length:
                 continue
             if max_prompt_length is not None and len(prompt) > max_prompt_length:
                 continue
-            
+
             # Check response length constraints
             if min_response_length is not None and len(response) < min_response_length:
                 continue
             if max_response_length is not None and len(response) > max_response_length:
                 continue
-            
+
             # Write filtered item
             outfile.write(json.dumps(item) + "\n")
             filtered_count += 1
-    
-    print(f"Filtered {filtered_count}/{total_count} items ({filtered_count/total_count*100:.1f}%)")
+
+    print(
+        f"Filtered {filtered_count}/{total_count} items ({filtered_count / total_count * 100:.1f}%)"
+    )
     print(f"Output written to: {output_path}")
 
 
@@ -67,55 +69,49 @@ def main():
     parser = argparse.ArgumentParser(
         description="Filter JSONL files based on prompt and/or response length"
     )
+    parser.add_argument("input_path", type=str, help="Path to input JSONL file")
     parser.add_argument(
-        "input_path",
-        type=str,
-        help="Path to input JSONL file"
-    )
-    parser.add_argument(
-        "output_path",
-        type=str,
-        help="Path to output filtered JSONL file"
+        "output_path", type=str, help="Path to output filtered JSONL file"
     )
     parser.add_argument(
         "--min-prompt-length",
         type=int,
         default=None,
-        help="Minimum prompt length in characters"
+        help="Minimum prompt length in characters",
     )
     parser.add_argument(
         "--max-prompt-length",
         type=int,
         default=None,
-        help="Maximum prompt length in characters"
+        help="Maximum prompt length in characters",
     )
     parser.add_argument(
         "--min-response-length",
         type=int,
         default=None,
-        help="Minimum response length in characters"
+        help="Minimum response length in characters",
     )
     parser.add_argument(
         "--max-response-length",
         type=int,
         default=None,
-        help="Maximum response length in characters"
+        help="Maximum response length in characters",
     )
     parser.add_argument(
         "--prompt-field",
         type=str,
         default="prompt",
-        help="Name of the field containing prompts (default: 'prompt')"
+        help="Name of the field containing prompts (default: 'prompt')",
     )
     parser.add_argument(
         "--response-field",
         type=str,
-        default="output",
-        help="Name of the field containing responses (default: 'output')"
+        default="response",
+        help="Name of the field containing responses (default: 'output')",
     )
-    
+
     args = parser.parse_args()
-    
+
     filter_jsonl_by_length(
         input_path=args.input_path,
         output_path=args.output_path,

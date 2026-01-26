@@ -155,7 +155,7 @@ dependencies = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.5.2" },
     { name = "alpaca-eval", git = "https://github.com/nelson-liu/alpaca_eval.git?rev=forward_kwargs_to_vllm" },
-    { name = "bitsandbytes" },
+    { name = "bitsandbytes", specifier = "==0.49.1" },
     { name = "flash-attn", marker = "sys_platform == 'linux'", specifier = "==2.7.4.post1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "math-verify", extras = ["antlr4-13-2"], specifier = ">=0.7.0" },

@@ -25,7 +25,7 @@ import bitsandbytes as bnb  # Import the library
 class TrainConfig:
     seed: int = 42
     device: str = "cuda"
-    train_data_path: str = "data/MATH/data/evaluation_results_openrouter.jsonl"
+    train_data_path: str = "data/MATH/data/deepseek_generated_train_data_max_len_1024_2048.jsonl"
     eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
     train_prompt_column: str = "prompt"
     train_response_column: str = "response"
