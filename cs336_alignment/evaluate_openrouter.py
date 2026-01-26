@@ -255,7 +255,7 @@ if __name__ == "__main__":
         top_p=1.0,
         max_tokens=2048,
         stop=["</answer>"],
-        output_path="./evaluation_results_openrouter.json",
+        output_path="./evaluation_results_openrouter.jsonl",
         data_idx_start=1796,
         data_idx_end=1000,
         add_think_tags=True,

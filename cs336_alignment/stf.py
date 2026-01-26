@@ -3,7 +3,12 @@ import re
 import torch
 from torch.autograd import grad
 import torch.nn.functional as F
-from transformers import PreTrainedModel, PreTrainedTokenizerBase, AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+)
 from vllm import LLM, SamplingParams
 from typing import Callable, Any, Tuple
 from evaluate_model import evaluate_vllm
@@ -35,7 +40,6 @@ class TrainConfig:
     gradient_accumulation_steps: int = 1
     train_log_interval: int = 10
     eval_log_interval: int = 20
-
 
 
 def tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer):
@@ -246,56 +250,58 @@ def compute_eval_metrics(
 
 def load_prompt_response_data_jsonl(file_path: str) -> list[Tuple[str, str]]:
     """Load data from a JSONL file containing 'prompt' and 'response' fields.
-    
+
     Args:
         file_path: Path to the JSONL file
-        
+
     Returns:
         List of tuples where each tuple contains (prompt, response)
     """
     data = []
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         for line in f:
             item = json.loads(line.strip())
-            data.append((item['prompt'], item['response']))
+            data.append((item["prompt"], item["response"]))
     return data
 
 
 def load_prompt_response_data_parquet(file_path: str) -> list[Tuple[str, str]]:
     """Load data from a Parquet file containing 'prompt' and 'response' fields.
-    
+
     Args:
         file_path: Path to the Parquet file
-        
+
     Returns:
         List of tuples where each tuple contains (prompt, response)
     """
-    
+
     df = pd.read_parquet(file_path)
-    data = [(row['prompt'], row['response']) for _, row in df.iterrows()]
+    data = [(row["prompt"], row["response"]) for _, row in df.iterrows()]
     return data
 
 
 def load_prompt_response_data(file_path: str) -> list[Tuple[str, str]]:
     """Load data from a file containing 'prompt' and 'response' fields.
-    
+
     Supports both JSONL and Parquet file formats. The format is determined by the file extension.
-    
+
     Args:
         file_path: Path to the data file (.jsonl or .parquet)
-        
+
     Returns:
         List of tuples where each tuple contains (prompt, response)
-        
+
     Raises:
         ValueError: If the file extension is not supported
     """
-    if file_path.endswith('.jsonl'):
+    if file_path.endswith(".jsonl"):
         return load_prompt_response_data_jsonl(file_path)
-    elif file_path.endswith('.parquet'):
+    elif file_path.endswith(".parquet"):
         return load_prompt_response_data_parquet(file_path)
     else:
-        raise ValueError(f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}")
+        raise ValueError(
+            f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}"
+        )
 
 
 def init_vllm(
@@ -337,63 +343,93 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 def train(config: TrainConfig):
     model_id = "Qwen/Qwen2.5-Math-1.5B"
-    vllm_model = init_vllm(model_id, device=config.device, dtype=config.dtype, seed=config.seed, seed=config.seed)
-    hf_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=getattr(torch, config.dtype), device_map=config.device, trust_remote_code=True)
+    vllm_model = init_vllm(
+        model_id,
+        device=config.device,
+        dtype=config.dtype,
+        seed=config.seed,
+        gpu_memory_utilization=config.gpu_memory_utilization,
+    )
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=getattr(torch, config.dtype),
+        device_map=config.device,
+        trust_remote_code=True,
+    )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(config.train_data_path)
     eval_data = load_prompt_response_data(config.eval_data_path)
-    
-    # Setup wandb metrics 
+
+    # Setup wandb metrics
     wandb.define_metric("train_step")
     wandb.define_metric("eval_step")
     wandb.define_metric("train/*", step_metric="train_step")
     wandb.define_metric("eval/*", step_metric="eval_step")
-    
+
     # Setup optimizer
     optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
-    
+
     # Training loop
     hf_model.train()
     global_step = 0
-    
+
     for epoch in range(config.num_epochs):
         train_data = [train_data[i] for i in torch.randperm(len(train_data))]
         for batch_idx in range(0, len(train_data), config.batch_size):
             # Get batch
-            batch_data = train_data[batch_idx:batch_idx + config.batch_size]
+            batch_data = train_data[batch_idx : batch_idx + config.batch_size]
             prompts = [item[0] for item in batch_data]
             responses = [item[1] for item in batch_data]
-             
+
             tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
             input_ids = tokenized_data["input_ids"]
             labels = tokenized_data["labels"]
             response_mask = tokenized_data["response_mask"]
 
-            probs = get_response_log_probs(hf_model, input_ids, labels, return_token_entropy=True)
+            probs = get_response_log_probs(
+                hf_model, input_ids, labels, return_token_entropy=True
+            )
             log_probs = probs["log_probs"]
             entropy = probs["entropy"]
 
-            loss, train_metrics = sft_microbatch_train_step(log_probs, 
-                                                            response_mask,
-                                                            gradient_accumulation_steps=config.gradient_accumulation_steps)
+            loss, train_metrics = sft_microbatch_train_step(
+                log_probs,
+                response_mask,
+                gradient_accumulation_steps=config.gradient_accumulation_steps,
+            )
             if global_step % config.gradient_accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(hf_model.parameters(), max_norm=1.0)
                 optimizer.zero_grad()
                 optimizer.step()
-            
-            if config.train_log_interval > 0 and global_step % config.train_log_interval == 0:
-                avg_entropy = masked_normalize(entropy,
-                                               response_mask,
-                                               dim=-1,
-                                               normalize_constant=response_mask.sum(dim=-1)).mean().item()
-                wandb.log({
-                    "train/avg_entropy": avg_entropy,
-                    "train/avg_loss": loss.item() * config.gradient_accumulation_steps,
-                    "train/step": global_step,
-                    "train/epoch": epoch,
-                    **train_metrics
-                })
-            if config.eval_log_interval > 0 and global_step % config.eval_log_interval == 0:
+
+            if (
+                config.train_log_interval > 0
+                and global_step % config.train_log_interval == 0
+            ):
+                avg_entropy = (
+                    masked_normalize(
+                        entropy,
+                        response_mask,
+                        dim=-1,
+                        normalize_constant=response_mask.sum(dim=-1),
+                    )
+                    .mean()
+                    .item()
+                )
+                wandb.log(
+                    {
+                        "train/avg_entropy": avg_entropy,
+                        "train/avg_loss": loss.item()
+                        * config.gradient_accumulation_steps,
+                        "train/step": global_step,
+                        "train/epoch": epoch,
+                        **train_metrics,
+                    }
+                )
+            if (
+                config.eval_log_interval > 0
+                and global_step % config.eval_log_interval == 0
+            ):
                 with torch.no_grad():
                     load_policy_into_vllm_instance(hf_model, vllm_model)
                     eval_metrics = compute_eval_metrics(
@@ -408,11 +444,6 @@ def train(config: TrainConfig):
                         top_p=config.top_p,
                     )
                     wandb.log(eval_metrics)
-
-
-
-            
-            
 
 
 if __name__ == "__main__":
