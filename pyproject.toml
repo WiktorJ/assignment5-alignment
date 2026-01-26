@@ -21,7 +21,8 @@ dependencies = [
     "wandb>=0.19.8",
     "xopen>=2.0.2",
     "tyro==0.9.35",
-    "bitsandbytes==0.49.1"
+    "bitsandbytes==0.49.1",
+    "tensorboard"
 ]
 
 [tool.setuptools.packages.find]
