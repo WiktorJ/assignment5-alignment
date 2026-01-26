@@ -406,7 +406,7 @@ def train(config: TrainConfig):
                 hf_model, input_ids, labels, return_token_entropy=True
             )
             log_probs = probs["log_probs"]
-            entropy = probs["entropy"]
+            entropy = probs["token_entropy"]
 
             loss, train_metrics = sft_microbatch_train_step(
                 log_probs,
