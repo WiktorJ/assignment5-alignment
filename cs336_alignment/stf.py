@@ -28,8 +28,10 @@ class TrainConfig:
     device: str = "cuda"
     train_data_path: str = "data/MATH/data/evaluation_results_openrouter.jsonl"
     eval_data_path: str = "data/MATH/data/test-00000-of-00001.parquet"
-    prompt_column: str = "prompt"
-    response_column: str = "response"
+    train_prompt_column: str = "prompt"
+    train_response_column: str = "response"
+    eval_prompt_column: str = "prompt"
+    eval_response_column: str = "response"
     gpu_memory_utilization: float = 0.85
     dtype: str = "bfloat16"
     batch_size: int = 16
@@ -372,10 +374,10 @@ def train(config: TrainConfig):
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(
-        config.train_data_path, config.prompt_column, config.response_column
+        config.train_data_path, config.train_prompt_column, config.train_response_column
     )
     eval_data = load_prompt_response_data(
-        config.eval_data_path, config.prompt_column, config.response_column
+        config.eval_data_path, config.eval_prompt_column, config.eval_response_column
     )
 
     # Setup wandb metrics
