@@ -384,6 +384,7 @@ def train(config: TrainConfig):
         config.eval_data_path, config.eval_prompt_column, config.eval_response_column
     )
 
+    wandb.init(mode="offline")
     # Setup wandb metrics
     wandb.define_metric("train_step")
     wandb.define_metric("eval_step")
