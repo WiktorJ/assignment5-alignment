@@ -12,8 +12,13 @@ from transformers import (
 from vllm import LLM, SamplingParams
 from cs336_alignment.evaluate_model import evaluate_vllm
 from cs336_alignment.file_util import load_prompt_response_data
-from torch.optim import AdamW
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+from cs336_alignment.stf import (
+    tokenize_prompt_and_output,
+    get_response_log_probs,
+    masked_normalize,
+)
+from torch.optim import AdamW
 import bitsandbytes as bnb
 
 
@@ -38,6 +43,7 @@ class TrainConfig:
     n_grpo_steps: int = 200
     learning_rate: float = 1e-5
     advantage_eps: float = 1e-6
+    clip_range: float = 1.0
     rollout_batch_size: int = 256
     group_size: int = 8
     temperature: float = 1.0
@@ -235,6 +241,9 @@ def sample_rollout(
 
 
 def train(config: TrainConfig):
+    assert config.train_batch_size >= config.rollout_batch_size
+    assert config.train_batch_size % config.rollout_batch_size == 0
+
     model_id = "Qwen/Qwen2.5-Math-1.5B"
     hf_model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -267,16 +276,109 @@ def train(config: TrainConfig):
 
     # Training loop/
     hf_model.train()
-    for epoch in range(config.n_grpo_steps):
-        rollouts = sample_rollout(
-            vllm_model=hf_model,
-            data=train_data,
-            group_size=config.group_size,
-            reward_fn=r1_zero_reward_fn,
-            max_length=config.max_length,
-            temperature=config.temperature,
-            top_p=config.top_p,
-        )
+    n_prompts_per_rollout = config.rollout_batch_size // config.group_size
+    micro_batch_size = config.train_batch_size // config.gradient_accumulation_steps
+    global_step = 0
+    for grpo_step in range(config.n_grpo_steps):
+        for rollout_idx in range(0, len(train_data), n_prompts_per_rollout):
+            rollout_train_data = train_data[
+                rollout_idx : rollout_idx + config.rollout_batch_size
+            ]
+            rollouts = sample_rollout(
+                vllm_model=hf_model,
+                data=rollout_train_data,
+                group_size=config.group_size,
+                reward_fn=r1_zero_reward_fn,
+                max_length=config.max_length,
+                temperature=config.temperature,
+                top_p=config.top_p,
+            )
+            repeated_group_thruths = [
+                answer
+                for answer in rollouts["answers"]
+                for _ in range(config.group_size)
+            ]
+            rolledout_responses = [
+                r for r in rollouts["responses"] for _ in range(config.group_size)
+            ]
+            rolled_out_prompts = [
+                r for r in rollouts["promtps"] for _ in range(config.group_size)
+            ]
+            advantages, group_rewards, metadata = compute_group_normalized_rewards(
+                reward_fn=r1_zero_reward_fn,
+                rollout_responses=rolledout_responses,
+                repeated_group_thruths=repeated_group_thruths,
+                group_size=config.group_size,
+                advantage_eps=config.advantage_eps,
+                normalize_by_std=config.use_std_normalization,
+            )
+            for epoch in range(config.epochs_per_rollout_batch):
+                for batch_idx in range(0, len(advantages), micro_batch_size):
+                    batch_advantages = advantages[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
+                    batch_group_rewards = group_rewards[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
+                    batch_prompts = rolled_out_prompts[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
+                    batch_outputs = rolledout_responses[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
+                    tokenized_data = tokenize_prompt_and_output(
+                        batch_prompts, batch_outputs, tokenizer
+                    )
+                    input_ids = tokenized_data["input_ids"]
+                    labels = tokenized_data["labels"]
+                    response_mask = tokenized_data["response_mask"]
+                    probs = get_response_log_probs(
+                        hf_model,
+                        input_ids,
+                        labels,
+                        return_token_entropy=True,
+                        inference_mode=False,
+                    )
+                    loss, loss_metadata = grpo_microbatch_train_step(
+                        probs["log_probs"],
+                        response_mask,
+                        config.gradient_accumulation_steps,
+                        config.loss_type,
+                        batch_group_rewards,
+                        batch_advantages,
+                        probs["log_probs"],
+                        config.clip_range,
+                    )
+
+                    if global_step % config.gradient_accumulation_steps == 0:
+                        torch.nn.utils.clip_grad_norm_(hf_model.parameters(), 1.0)
+                        optimizer.step()
+                        optimizer.zero_grad()
+                    global_step += 1
+                    if global_step % config.train_log_interval == 0:
+                        avg_entropy = (
+                            masked_normalize(
+                                probs["entropy"],
+                                response_mask,
+                                dim=-1,
+                                normalize_constant=response_mask.sum(dim=-1),
+                            )
+                            .mean()
+                            .item()
+                        )
+                        avg_loss = loss.item() * config.gradient_accumulation_steps
+                        print(
+                            f"\n[Train Log] Step {global_step} | Loss: {avg_loss:.4f} | Entropy: {avg_entropy:.4f}"
+                        )
+                        wandb.log(
+                            {
+                                "train/avg_entropy": avg_entropy,
+                                "train/avg_loss": avg_loss,
+                                "train/step": global_step,
+                                "train/epoch": epoch,
+                                **loss_metadata,
+                            }
+                        )
 
 
 if __name__ == "__main__":
