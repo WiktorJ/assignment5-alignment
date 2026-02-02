@@ -56,17 +56,18 @@ def evaluate_vllm(
     # Collect intermediate results
     intermediate_results = []
     for prompt, answer, output in zip(prompts, answers, outputs):
-        score = reward_fn(output.outputs[0].text, answer)
-        intermediate_results.append(
-            {
-                "prompt": prompt,
-                "answer": answer,
-                "output": output.outputs[0].text,
-                "format_reward": score["format_reward"],
-                "answer_reward": score["answer_reward"],
-                "reward": score["reward"],
-            }
-        )
+        for output in output.outputs:
+            score = reward_fn(output.text, answer)
+            intermediate_results.append(
+                {
+                    "prompt": prompt,
+                    "answer": answer,
+                    "output": output.text,
+                    "format_reward": score["format_reward"],
+                    "answer_reward": score["answer_reward"],
+                    "reward": score["reward"],
+                }
+            )
 
     # Save results if output path is provided
     if output_path:

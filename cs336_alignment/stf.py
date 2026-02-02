@@ -9,6 +9,7 @@ from transformers import (
 from vllm import LLM, SamplingParams
 from typing import Callable, Any, Tuple
 from cs336_alignment.evaluate_model import evaluate_vllm
+from cs336_alignment.file_util import load_prompt_response_data
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from unittest.mock import patch
 import tyro
@@ -18,7 +19,7 @@ import wandb
 import torch
 from torch.optim import AdamW
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-import bitsandbytes as bnb  # Import the library
+import bitsandbytes as bnb
 
 
 @dataclass
@@ -272,78 +273,6 @@ def compute_eval_metrics(
         "avg_correct_resp_len": avg_correct_resp_len.item(),
         "avg_incorrect_resp_len": avg_incorrect_resp_len.item(),
     }
-
-
-def load_prompt_response_data_jsonl(
-    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
-) -> list[Tuple[str, str]]:
-    """Load data from a JSONL file containing prompt and response fields.
-
-    Args:
-        file_path: Path to the JSONL file
-        prompt_column: Name of the column containing prompts
-        response_column: Name of the column containing responses
-
-    Returns:
-        List of tuples where each tuple contains (prompt, response)
-    """
-    data = []
-    with open(file_path, "r") as f:
-        for line in f:
-            item = json.loads(line.strip())
-            data.append((item[prompt_column], item[response_column]))
-    return data
-
-
-def load_prompt_response_data_parquet(
-    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
-) -> list[Tuple[str, str]]:
-    """Load data from a Parquet file containing prompt and response fields.
-
-    Args:
-        file_path: Path to the Parquet file
-        prompt_column: Name of the column containing prompts
-        response_column: Name of the column containing responses
-
-    Returns:
-        List of tuples where each tuple contains (prompt, response)
-    """
-
-    df = pd.read_parquet(file_path)
-    data = [(row[prompt_column], row[response_column]) for _, row in df.iterrows()]
-    return data
-
-
-def load_prompt_response_data(
-    file_path: str, prompt_column: str = "prompt", response_column: str = "response"
-) -> list[Tuple[str, str]]:
-    """Load data from a file containing prompt and response fields.
-
-    Supports both JSONL and Parquet file formats. The format is determined by the file extension.
-
-    Args:
-        file_path: Path to the data file (.jsonl or .parquet)
-        prompt_column: Name of the column containing prompts
-        response_column: Name of the column containing responses
-
-    Returns:
-        List of tuples where each tuple contains (prompt, response)
-
-    Raises:
-        ValueError: If the file extension is not supported
-    """
-    if file_path.endswith(".jsonl"):
-        return load_prompt_response_data_jsonl(
-            file_path, prompt_column, response_column
-        )
-    elif file_path.endswith(".parquet"):
-        return load_prompt_response_data_parquet(
-            file_path, prompt_column, response_column
-        )
-    else:
-        raise ValueError(
-            f"Unsupported file format. File must be .jsonl or .parquet, got: {file_path}"
-        )
 
 
 def init_vllm(
