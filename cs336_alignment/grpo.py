@@ -312,6 +312,29 @@ def train(config: TrainConfig):
                 advantage_eps=config.advantage_eps,
                 normalize_by_std=config.use_std_normalization,
             )
+            tokenized_data = tokenize_prompt_and_output(
+                rolled_out_prompts, rolledout_responses, tokenizer
+            )
+            input_ids = tokenized_data["input_ids"]
+            labels = tokenized_data["labels"]
+            response_mask = tokenized_data["response_mask"]
+            old_log_probs = torch.empty()
+            for batch_idx in range(0, len(advantages), micro_batch_size):
+                batch_input_ids = input_ids[
+                    batch_idx : batch_idx + config.train_batch_size
+                ]
+                batch_labels = labels[batch_idx : batch_idx + config.train_batch_size]
+
+                old_log_probs[batch_idx : batch_idx + config.train_batch_size] = (
+                    get_response_log_probs(
+                        hf_model,
+                        batch_input_ids,
+                        batch_labels,
+                        return_token_entropy=False,
+                        inference_mode=True,
+                    )["log_probs"]
+                )
+
             for epoch in range(config.epochs_per_rollout_batch):
                 for batch_idx in range(0, len(advantages), micro_batch_size):
                     batch_advantages = advantages[
@@ -320,33 +343,33 @@ def train(config: TrainConfig):
                     batch_group_rewards = group_rewards[
                         batch_idx : batch_idx + config.train_batch_size
                     ]
-                    batch_prompts = rolled_out_prompts[
+                    batch_input_ids = input_ids[
                         batch_idx : batch_idx + config.train_batch_size
                     ]
-                    batch_outputs = rolledout_responses[
+                    batch_labels = labels[
                         batch_idx : batch_idx + config.train_batch_size
                     ]
-                    tokenized_data = tokenize_prompt_and_output(
-                        batch_prompts, batch_outputs, tokenizer
-                    )
-                    input_ids = tokenized_data["input_ids"]
-                    labels = tokenized_data["labels"]
-                    response_mask = tokenized_data["response_mask"]
+                    batch_response_mask = response_mask[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
+                    batch_old_log_probs = old_log_probs[
+                        batch_idx : batch_idx + config.train_batch_size
+                    ]
                     probs = get_response_log_probs(
                         hf_model,
-                        input_ids,
-                        labels,
+                        batch_input_ids,
+                        batch_labels,
                         return_token_entropy=True,
                         inference_mode=False,
                     )
                     loss, loss_metadata = grpo_microbatch_train_step(
                         probs["log_probs"],
-                        response_mask,
+                        batch_response_mask,
                         config.gradient_accumulation_steps,
                         config.loss_type,
                         batch_group_rewards,
                         batch_advantages,
-                        probs["log_probs"],
+                        batch_old_log_probs,
                         config.clip_range,
                     )
 
