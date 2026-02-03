@@ -391,7 +391,9 @@ def train(config: TrainConfig):
             input_ids = tokenized_data["input_ids"]
             labels = tokenized_data["labels"]
             response_mask = tokenized_data["response_mask"]
-            old_log_probs = torch.empty()
+            old_log_probs = torch.empty(
+                input_ids.shape, dtype=torch.float32, device=config.device
+            )
             for batch_idx in range(0, len(advantages), micro_batch_size):
                 batch_input_ids = input_ids[
                     batch_idx : batch_idx + config.train_batch_size
