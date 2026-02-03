@@ -21,6 +21,7 @@ from cs336_alignment.stf import (
 from torch.optim import AdamW
 import bitsandbytes as bnb
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
+from unittest.mock import patch
 
 
 @dataclass
