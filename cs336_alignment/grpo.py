@@ -244,6 +244,19 @@ def train(config: TrainConfig):
     assert config.train_batch_size >= config.rollout_batch_size
     assert config.train_batch_size % config.rollout_batch_size == 0
 
+    print("=" * 80)
+    print("Starting GRPO Training")
+    print("=" * 80)
+    print(f"Model: Qwen/Qwen2.5-Math-1.5B")
+    print(f"Total GRPO steps: {config.n_grpo_steps}")
+    print(f"Rollout batch size: {config.rollout_batch_size}")
+    print(f"Group size: {config.group_size}")
+    print(f"Train batch size: {config.train_batch_size}")
+    print(f"Gradient accumulation steps: {config.gradient_accumulation_steps}")
+    print(f"Learning rate: {config.learning_rate}")
+    print(f"Loss type: {config.loss_type}")
+    print("=" * 80)
+
     model_id = "Qwen/Qwen2.5-Math-1.5B"
     hf_model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -274,16 +287,28 @@ def train(config: TrainConfig):
     else:
         optimizer = AdamW(hf_model.parameters(), lr=config.learning_rate)
 
-    # Training loop/
+    # Training loop
     hf_model.train()
     n_prompts_per_rollout = config.rollout_batch_size // config.group_size
     micro_batch_size = config.train_batch_size // config.gradient_accumulation_steps
     global_step = 0
+    
+    print(f"\nStarting training loop with {len(train_data)} training examples")
+    print(f"Prompts per rollout: {n_prompts_per_rollout}")
+    print(f"Micro batch size: {micro_batch_size}\n")
+    
     for grpo_step in range(config.n_grpo_steps):
+        print(f"\n{'='*80}")
+        print(f"GRPO Step {grpo_step + 1}/{config.n_grpo_steps}")
+        print(f"{'='*80}")
+        
         for rollout_idx in range(0, len(train_data), n_prompts_per_rollout):
+            print(f"\nRollout {rollout_idx // n_prompts_per_rollout + 1} - Processing prompts {rollout_idx} to {rollout_idx + n_prompts_per_rollout}")
             rollout_train_data = train_data[
                 rollout_idx : rollout_idx + config.rollout_batch_size
             ]
+            
+            print(f"  Sampling {config.group_size} rollouts per prompt...")
             rollouts = sample_rollout(
                 vllm_model=hf_model,
                 data=rollout_train_data,
@@ -312,6 +337,9 @@ def train(config: TrainConfig):
                 advantage_eps=config.advantage_eps,
                 normalize_by_std=config.use_std_normalization,
             )
+            
+            print(f"  Computed rewards - Mean: {metadata['rewards_mean']:.4f}, Std: {metadata['rewards_std']:.4f}")
+            print(f"  Advantages - Mean: {metadata['advantages_mean']:.4f}, Std: {metadata['advantages_std']:.4f}")
             tokenized_data = tokenize_prompt_and_output(
                 rolled_out_prompts, rolledout_responses, tokenizer
             )
@@ -336,6 +364,8 @@ def train(config: TrainConfig):
                 )
 
             for epoch in range(config.epochs_per_rollout_batch):
+                print(f"  Epoch {epoch + 1}/{config.epochs_per_rollout_batch}")
+                
                 for batch_idx in range(0, len(advantages), micro_batch_size):
                     batch_advantages = advantages[
                         batch_idx : batch_idx + config.train_batch_size
@@ -377,6 +407,7 @@ def train(config: TrainConfig):
                         torch.nn.utils.clip_grad_norm_(hf_model.parameters(), 1.0)
                         optimizer.step()
                         optimizer.zero_grad()
+                        print(f"    Optimizer step at global_step {global_step}")
                     global_step += 1
                     if global_step % config.train_log_interval == 0:
                         avg_entropy = (
