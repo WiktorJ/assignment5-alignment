@@ -20,6 +20,7 @@ from cs336_alignment.stf import (
 )
 from torch.optim import AdamW
 import bitsandbytes as bnb
+from vllm.model_executor import set_random_seed as vllm_set_random_seed
 
 
 @dataclass
@@ -240,6 +241,36 @@ def sample_rollout(
     }
 
 
+def init_vllm(
+    model_id: str,
+    device: str,
+    dtype: str,
+    seed: int,
+    gpu_memory_utilization: float = 0.85,
+):
+    """Start the inference process, here we use vLLM to hold a model on a GPU separate from the policy. 13"""
+    vllm_set_random_seed(seed)
+
+    # Monkeypatch from TRL:
+    # https://github.com/huggingface/trl/blob/ # 22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py
+    # Patch vLLM to make sure we can
+    # (1) place the vLLM model on the desired device (world_size_patch) and
+    # (2) avoid a test that is not designed for our setting (profiling_patch).
+    world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
+    profiling_patch = patch(
+        "vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
+        return_value=None,
+    )
+    with world_size_patch, profiling_patch:
+        return LLM(
+            model=model_id,
+            device=device,
+            dtype=dtype,
+            enable_prefix_caching=True,
+            gpu_memory_utilization=gpu_memory_utilization,
+        )
+
+
 def train(config: TrainConfig):
     assert config.train_batch_size >= config.rollout_batch_size
     assert config.train_batch_size % config.rollout_batch_size == 0
@@ -266,6 +297,13 @@ def train(config: TrainConfig):
         attn_implementation=config.attn_implementation,
     )
     hf_model.gradient_checkpointing_enable()
+    vllm_model = init_vllm(
+        model_id,
+        device=config.device,
+        dtype=config.dtype,
+        seed=config.seed,
+        gpu_memory_utilization=config.gpu_memory_utilization,
+    )
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     train_data = load_prompt_response_data(
         config.train_data_path, config.train_prompt_column, config.train_response_column
@@ -292,25 +330,27 @@ def train(config: TrainConfig):
     n_prompts_per_rollout = config.rollout_batch_size // config.group_size
     micro_batch_size = config.train_batch_size // config.gradient_accumulation_steps
     global_step = 0
-    
+
     print(f"\nStarting training loop with {len(train_data)} training examples")
     print(f"Prompts per rollout: {n_prompts_per_rollout}")
     print(f"Micro batch size: {micro_batch_size}\n")
-    
+
     for grpo_step in range(config.n_grpo_steps):
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"GRPO Step {grpo_step + 1}/{config.n_grpo_steps}")
-        print(f"{'='*80}")
-        
+        print(f"{'=' * 80}")
+
         for rollout_idx in range(0, len(train_data), n_prompts_per_rollout):
-            print(f"\nRollout {rollout_idx // n_prompts_per_rollout + 1} - Processing prompts {rollout_idx} to {rollout_idx + n_prompts_per_rollout}")
+            print(
+                f"\nRollout {rollout_idx // n_prompts_per_rollout + 1} - Processing prompts {rollout_idx} to {rollout_idx + n_prompts_per_rollout}"
+            )
             rollout_train_data = train_data[
                 rollout_idx : rollout_idx + config.rollout_batch_size
             ]
-            
+
             print(f"  Sampling {config.group_size} rollouts per prompt...")
             rollouts = sample_rollout(
-                vllm_model=hf_model,
+                vllm_model=vllm_model,
                 data=rollout_train_data,
                 group_size=config.group_size,
                 reward_fn=r1_zero_reward_fn,
@@ -337,9 +377,13 @@ def train(config: TrainConfig):
                 advantage_eps=config.advantage_eps,
                 normalize_by_std=config.use_std_normalization,
             )
-            
-            print(f"  Computed rewards - Mean: {metadata['rewards_mean']:.4f}, Std: {metadata['rewards_std']:.4f}")
-            print(f"  Advantages - Mean: {metadata['advantages_mean']:.4f}, Std: {metadata['advantages_std']:.4f}")
+
+            print(
+                f"  Computed rewards - Mean: {metadata['rewards_mean']:.4f}, Std: {metadata['rewards_std']:.4f}"
+            )
+            print(
+                f"  Advantages - Mean: {metadata['advantages_mean']:.4f}, Std: {metadata['advantages_std']:.4f}"
+            )
             tokenized_data = tokenize_prompt_and_output(
                 rolled_out_prompts, rolledout_responses, tokenizer
             )
@@ -365,7 +409,7 @@ def train(config: TrainConfig):
 
             for epoch in range(config.epochs_per_rollout_batch):
                 print(f"  Epoch {epoch + 1}/{config.epochs_per_rollout_batch}")
-                
+
                 for batch_idx in range(0, len(advantages), micro_batch_size):
                     batch_advantages = advantages[
                         batch_idx : batch_idx + config.train_batch_size
